@@ -59,6 +59,8 @@ def main():
         st.session_state.documents_data = {}
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
+    if "summaries" not in st.session_state:
+        st.session_state.summaries = {}
         
     # ------------------
     # Processing Phase
@@ -105,9 +107,14 @@ def main():
     with tab1:
         st.header("Chat with your Papers")
         
+        # Streamlit uses SVGs or basic emojis for avatars.
+        # This SVG natively replicates the 'default user icon' Streamlit theme (rounded square) but draws a boy figure instead.
+        boy_avatar_svg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='4' fill='%23ff4b4b'/%3E%3Cpath d='M12 12A3.5 3.5 0 0 0 12 5A3.5 3.5 0 0 0 12 12zM7 21v-1.5A4.5 4.5 0 0 1 11.5 15h1A4.5 4.5 0 0 1 17 19.5V21zM11.5 4a3.5 3.5 0 0 0-1.5 1.5C9.5 5 10.5 4 11.5 4zM12 4.5c.5-1 2-1 2 0 0 1-1 1-2 0z' fill='white'/%3E%3C/svg%3E"
+        
         # Display chat history
         for msg in st.session_state.chat_history:
-            st.chat_message(msg["role"]).write(msg["content"])
+            avatar = boy_avatar_svg if msg["role"] == "user" else None
+            st.chat_message(msg["role"], avatar=avatar).write(msg["content"])
             
         user_query = st.chat_input("Ask a question about the uploaded papers...")
         
@@ -119,7 +126,7 @@ def main():
             else:
                 # Add human message 
                 st.session_state.chat_history.append({"role": "user", "content": user_query})
-                st.chat_message("user").write(user_query)
+                st.chat_message("user", avatar=boy_avatar_svg).write(user_query)
                 
                 # Retrieval
                 docs = st.session_state.vector_store.similarity_search(user_query, k=5)
@@ -172,7 +179,10 @@ def main():
                 client = get_openrouter_client(api_key)
                 with st.spinner(f"Summarizing {selected_paper}..."):
                     summary = call_openrouter(client, text_model, prompt, temperature=0.3)
+                    st.session_state.summaries[selected_paper] = summary
                     st.markdown(summary)
+            elif selected_paper in st.session_state.summaries:
+                st.markdown(st.session_state.summaries[selected_paper])
         else:
             st.info("Upload and process some PDFs first.")
 
