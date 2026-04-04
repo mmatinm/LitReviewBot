@@ -1,65 +1,135 @@
 import os
-import io
 import fitz  # PyMuPDF
 import re
 from PIL import Image
+import io
 from openai import OpenAI
 from api_client import generate_image_caption
 
 def normalize_label(label: str) -> list:
-    """Takes a label like 'Figure 1' and returns regex variations for searching mentions."""
+    """Takes a label like 'Figure 1' and returns regex variations."""
     num_match = re.search(r'\d+[\w\.]*', label)
     if not num_match:
         return [label.lower()]
-    
     num = num_match.group()
     if "fig" in label.lower():
-        # Match 'figure 1', 'fig. 1', 'fig 1' and even 'figure 1a'
         return [rf"\bfigure\s+{num}\b", rf"\bfig\.\s*{num}\b", rf"\bfig\s+{num}\b"]
     elif "tab" in label.lower():
-        # Match 'table 1', 'tbl. 1', 'tbl 1'
         return [rf"\btable\s+{num}\b", rf"\btbl\.\s*{num}\b", rf"\btbl\s+{num}\b"]
-    
     return [label.lower()]
 
 def search_relevant_paragraphs(all_blocks: list, label: str) -> str:
-    """Searches ALL parsed text blocks across the entire paper for mentions of the figure."""
     if not label or label == "Unknown":
         return "No specific label identified."
-        
     patterns = normalize_label(label)
     combined_regex = re.compile('|'.join(patterns), re.IGNORECASE)
-    
-    relevant_paragraphs = []
-    
+    relevant = []
     for text in all_blocks:
-        # Ignore extremely short strings that might just be the bolded figure title itself
         if len(text.split()) > 5:
-            # We strip out newlines mathematically inside the block for regex matching
             clean_text = text.replace('\n', ' ')
             if combined_regex.search(clean_text):
-                relevant_paragraphs.append(clean_text.strip())
-                
-    if not relevant_paragraphs:
-        return f"No further deep paragraphs explicitly mentioning '{label}' found in the text."
+                relevant.append(clean_text.strip())
+    if not relevant:
+        return f"No deep paragraphs explicitly mentioning '{label}' found."
+    return "\n...\n".join(relevant)
+
+def merge_visual_rects(page_rects, margin=15):
+    """Merges overlapping or nearby geometric bounding boxes to form single coherent visual areas."""
+    merged = []
+    for r in page_rects:
+        if r.is_empty: continue
+        r_exp = r + (-margin, -margin, margin, margin)
+        intersected = []
+        for i, m in enumerate(merged):
+            m_exp = m + (-margin, -margin, margin, margin)
+            if r_exp.intersects(m_exp):
+                intersected.append(i)
         
-    return "\n...\n".join(relevant_paragraphs)
+        if not intersected:
+            merged.append(r)
+        else:
+            new_r = r
+            for i in sorted(intersected, reverse=True):
+                new_r = new_r | merged.pop(i)
+            merged.append(new_r)
+    return merged
+
+def sort_text_blocks(blocks, page_width):
+    """
+    Topological block sort handling pure 1-column vs 2-column layouts seamlessly.
+    It reads full-width abstracts first, then correctly sequences the left column followed by the right column.
+    """
+    def get_col(bbox):
+        x0, y0, x1, y1 = bbox
+        cx = (x0 + x1) / 2
+        # If block spans > 55% of the page width, it's a full-width section
+        is_wide = (x1 - x0) > (page_width * 0.55)
+        if is_wide: return 0 
+        return 1 if cx < page_width / 2 else 2
+        
+    blocks = sorted(blocks, key=lambda b: b['bbox'][1])
+    regions = []
+    current_region = []
+    
+    for b in blocks:
+        c = get_col(b['bbox'])
+        if c == 0:
+            if current_region:
+                regions.append(current_region)
+                current_region = []
+            regions.append([b])
+        else:
+            current_region.append(b)
+    if current_region:
+        regions.append(current_region)
+        
+    sorted_blocks = []
+    for region in regions:
+        if not region: continue
+        if len(region) == 1 and get_col(region[0]['bbox']) == 0:
+            sorted_blocks.append(region[0])
+        else:
+            left = sorted([b for b in region if get_col(b['bbox']) == 1], key=lambda b: b['bbox'][1])
+            right = sorted([b for b in region if get_col(b['bbox']) == 2], key=lambda b: b['bbox'][1])
+            sorted_blocks.extend(left)
+            sorted_blocks.extend(right)
+            
+    return sorted_blocks
+
+def get_closest_visual(caption_bbox, visual_rects):
+    """Pairs a caption to its structurally corresponding visual bounding box (above or below)."""
+    best_rect = None
+    min_dist = float('inf')
+    cx = (caption_bbox[0] + caption_bbox[2]) / 2
+    
+    for r in visual_rects:
+        rcx = (r.x0 + r.x1) / 2
+        # Ensure it's roughly in the same vertical column band
+        if abs(rcx - cx) < 250:
+            dist = min(abs(caption_bbox[1] - r.y1), abs(r.y0 - caption_bbox[3]))
+            if dist < min_dist:
+                min_dist = dist
+                best_rect = r
+                
+    if min_dist > 300:
+        return None
+        
+    return best_rect
 
 def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_callback=None):
     """
-    Parses PDFs using an intelligent layout-based extraction:
-    1. Scans text specifically looking for lines starting with 'Figure X' or 'Table X' (i.e. Captions).
-    2. Dynamically clips the page bounding box corresponding to that caption natively securing all charts/graphs/plots.
-    3. Hunts for all paragraphs mentioning that exact label everywhere in the paper.
-    4. Sends it to Vision model, saves the exact match, and neatly integrates the label inline.
+    Advanced PDF Processor strictly rolled back to the stable topological sort.
+    We dropped pdfplumber entirely for extreme speed, utilizing PyMuPDF table geometry.
+    Fixed the sub-label text cutoff by precisely linking figure boundaries to their captions.
     """
     documents_data = {}  
     total_files = len(upload_files)
     
     save_dir = "extracted_visuals"
     os.makedirs(save_dir, exist_ok=True)
+    save_text_dir = "extracted_texts"
+    os.makedirs(save_text_dir, exist_ok=True)
     
-    # Regex looks for blocks starting with 'Fig. 1', 'Figure 2:', 'Table 1 -' etc.
     label_pattern = re.compile(r'(?i)^(figure|fig\.?|table|tab\.?)\s+(\d+[\w\.]*)(?::|\.|-)?\s*(.*)')
 
     for file_idx, uploaded_file in enumerate(upload_files):
@@ -71,46 +141,70 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
         pdf_bytes = uploaded_file.read()
         pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
         
-        # Pass 1: Extract all text blocks globally & layout maps
-        all_blocks = []
-        page_blocks_map = {} 
-        
-        full_paper_text = f"--- START OF PAPER: {filename} ---\n\n"
+        all_blocks_flat = []
+        page_payloads = []
         
         for page_num in range(len(pdf_document)):
             page = pdf_document.load_page(page_num)
+            
+            # --- 1. Gather all geometric visual regions with massive pure C speedups! ---
+            raw_rects = []
+            
+            # 1a. Rasp Images
+            for img in page.get_image_info(xrefs=True):
+                raw_rects.append(fitz.Rect(img["bbox"]))
+                
+            # 1b. Vector Graphics (charts/graphs/schematics)
+            for d in page.get_drawings():
+                r = d["rect"]
+                # Prevent massive invisible page-borders from mapping as an image
+                if 10 < r.width < page.rect.width * 0.90 and 10 < r.height < page.rect.height * 0.90:
+                    raw_rects.append(fitz.Rect(r))
+                    
+            # 1c. Native Fast Tables
+            tabs = page.find_tables()
+            if tabs.tables:
+                for t in tabs.tables:
+                    raw_rects.append(fitz.Rect(t.bbox))
+                
+            merged_visuals = merge_visual_rects(raw_rects, margin=20)
+            
+            # --- 2. Extract Text & Clean Pollutant Labels ---
             blocks = page.get_text("dict")["blocks"]
             text_blocks = [b for b in blocks if b['type'] == 0]
             
-            # Sort blocks top-to-bottom for logical layout parsing
-            text_blocks = sorted(text_blocks, key=lambda b: b['bbox'][1])
-            
-            page_text_blocks = []
+            clean_text_blocks = []
             for b in text_blocks:
-                # Rebuild text intelligently avoiding shattered spaces
-                lines = []
-                for l in b["lines"]:
-                    lines.append(" ".join([s["text"] for s in l["spans"]]))
-                text = " ".join(lines).strip()
+                b_rect = fitz.Rect(b["bbox"])
+                polluted = False
+                for v_rect in merged_visuals:
+                    intersect = b_rect.intersect(v_rect)
+                    if not intersect.is_empty:
+                        if intersect.get_area() > b_rect.get_area() * 0.5:
+                            polluted = True
+                            break
                 
-                if text:
-                    page_text_blocks.append({"bbox": b["bbox"], "text": text})
-                    all_blocks.append(text)
-                    
-            page_blocks_map[page_num] = page_text_blocks
-            page_full_text = "\n\n".join([b["text"] for b in page_text_blocks])
-            full_paper_text += f"\n--- Page {page_num + 1} ---\n" + page_full_text + "\n"
-
-        # Pass 2: Layout Parsing purely for missing/vector graphics matching captions
-        visuals_extracted_text = "\n\n--- EXTRACTED FIGURES & TABLES ---\n\n"
-        
-        visual_count = 0
-        for page_num in range(len(pdf_document)):
-            page = pdf_document.load_page(page_num)
-            blocks = page_blocks_map[page_num]
+                if not polluted:
+                    lines = []
+                    for l in b["lines"]:
+                        lines.append(" ".join([s["text"] for s in l["spans"]]))
+                    text = " ".join(lines).strip()
+                    if text:
+                        clean_text_blocks.append({
+                            "bbox": b["bbox"], 
+                            "text": text,
+                            "is_caption": False
+                        })
+                        all_blocks_flat.append(text)
             
-            for i, b in enumerate(blocks):
-                # Clean block mapping
+            page_payloads.append((page, clean_text_blocks, merged_visuals))
+
+        # --- 3. Link Captions, Sweep Orphaned Labels, Query Vision ---
+        full_paper_formatted_text = f"--- START OF PAPER: {filename} ---\n\n"
+        
+        for page_num, (page, text_blocks, merged_visuals) in enumerate(page_payloads):
+            
+            for b in text_blocks:
                 text_clean = b["text"].replace('\n', ' ')
                 match = label_pattern.search(text_clean)
                 
@@ -119,84 +213,74 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                     label_num = match.group(2)
                     caption_body = match.group(3).strip()
                     
-                    if "fig" in label_type:
-                        canonical_label = f"Figure {label_num}"
-                    else:
-                        canonical_label = f"Table {label_num}"
-                        
-                    caption_bbox = b["bbox"] # (x0, y0, x1, y1)
-                    clip_rect = fitz.Rect(0, 0, page.rect.width, page.rect.height)
+                    canonical_label = f"Figure {label_num}" if "fig" in label_type else f"Table {label_num}"
                     
-                    render_margin = 20
-                    # Usually Figures are placed ABOVE their captions
-                    if "fig" in label_type:
-                        top_y = 0
-                        if i > 0:
-                            top_y = blocks[i-1]["bbox"][3] # bottom of previous text block
+                    caption_rect = fitz.Rect(b["bbox"])
+                    matched_visual = get_closest_visual(caption_rect, merged_visuals)
+                    
+                    if matched_visual:
+                        try:
+                            # 10px boundary pad
+                            final_rect = matched_visual + (-10, -10, 10, 10) 
                             
-                        # constrain height realistically so we don't grab half the page randomly
-                        top_y = max(top_y, caption_bbox[1] - 450)
-                        
-                        if top_y >= caption_bbox[1] - render_margin:
-                            top_y = max(0, caption_bbox[1] - 300)
-                            
-                        clip_rect = fitz.Rect(0, top_y, page.rect.width, caption_bbox[1])
-                        
-                    # Tables are usually placed BELOW their captions (or between)
-                    else:
-                        bottom_y = page.rect.height
-                        if i < len(blocks) - 1:
-                            bottom_y = blocks[i+1]["bbox"][1] # top of the subsequent text block
-                            
-                        bottom_y = min(bottom_y, caption_bbox[3] + 450)
-                        
-                        if bottom_y <= caption_bbox[3] + render_margin:
-                            bottom_y = min(page.rect.height, caption_bbox[3] + 300)
-                            
-                        clip_rect = fitz.Rect(0, caption_bbox[3], page.rect.width, bottom_y)
-                        
-                    # CRITICAL FIX: Extract image by clipping the page area natively! 
-                    # This captures ALL vectors, plots, lines and maps seamlessly as 1 image.
-                    try:
-                        pix = page.get_pixmap(clip=clip_rect, dpi=200) # High DPI for clarity
-                        image_bytes = pix.tobytes("jpeg")
-                        visual_count += 1
-                        
-                        # 3. Retrieve deep paragraphs referencing this explicit label throughout the paper
-                        context_paragraphs = search_relevant_paragraphs(all_blocks, canonical_label)
-                        
-                        vision_prompt_context = f"Caption: {canonical_label} - {caption_body}\n\nMentions scattered in paper:\n{context_paragraphs}"
-                        vision_description = generate_image_caption(client, vision_model, image_bytes, vision_prompt_context)
-                        
-                        # Save for user debugging
-                        safe_filename = filename.replace(".pdf", "")
-                        safe_label = canonical_label.replace(" ", "_")
-                        base_name = f"{safe_filename}_{safe_label}"
-                        
-                        img_path = os.path.join(save_dir, f"{base_name}.jpg")
-                        with open(img_path, "wb") as f:
-                            f.write(image_bytes)
-                            
-                        txt_path = os.path.join(save_dir, f"{base_name}.txt")
-                        with open(txt_path, "w", encoding="utf-8") as f:
-                            f.write(f"--- Detected Label ---\n{canonical_label}: {caption_body}\n\n")
-                            f.write(f"--- Whole Paper Context Mentions ---\n{context_paragraphs}\n\n")
-                            f.write(f"--- AI Vision Output ---\n{vision_description}\n")
-                        
-                        # Inline Label Injection: Ensuring the exact title flows natively into RAG bounds
-                        visual_block = (
-                            f"\n\n=========================================\n"
-                            f"[Visual Element: {canonical_label}]\n"
-                            f"[Caption Extracted: {caption_body}]\n"
-                            f"[Vision Model Comprehensive Analysis: {vision_description}]\n"
-                            f"=========================================\n\n"
-                        )
-                        visuals_extracted_text += visual_block
-                        
-                    except Exception as e:
-                        print(f"Skipped rendering rect for {canonical_label}: {e}")
+                            # CRITICAL FIX for the "CNN/LSTM text cutoff":
+                            # We stretch the bounding box perfectly flush to the caption header 
+                            # capturing all un-boxed sub-labels naturally sitting between.
+                            # We ALSO expand the width carefully just to match the caption's width,
+                            # preventing those awful cross-column expansions we experienced.
+                            if "fig" in label_type:
+                                final_rect.y1 = max(final_rect.y1, caption_rect.y0 - 2)
+                            else:
+                                final_rect.y0 = min(final_rect.y0, caption_rect.y1 + 2)
 
-        # Stitch visuals to the end so chunking parses them flawlessly
-        documents_data[filename] = full_paper_text + visuals_extracted_text
+                            final_rect.x0 = min(final_rect.x0, caption_rect.x0)
+                            final_rect.x1 = max(final_rect.x1, caption_rect.x1)
+
+                            final_rect = final_rect.intersect(page.rect)
+                            
+                            pix = page.get_pixmap(clip=final_rect, dpi=200) 
+                            image_bytes = pix.tobytes("jpeg")
+                            
+                            context_paragraphs = search_relevant_paragraphs(all_blocks_flat, canonical_label)
+                            
+                            vision_prompt_context = f"Visual Name: {canonical_label}. Original Caption: {caption_body}\n\nKey occurrences found in text:\n{context_paragraphs}"
+                            vision_description = generate_image_caption(client, vision_model, image_bytes, vision_prompt_context)
+                            
+                            safe_filename = filename.replace(".pdf", "")
+                            base_name = f"{safe_filename}_Page{page_num+1}_{canonical_label.replace(' ', '_')}"
+                            
+                            with open(os.path.join(save_dir, f"{base_name}.jpg"), "wb") as f:
+                                f.write(image_bytes)
+                            with open(os.path.join(save_dir, f"{base_name}.txt"), "w", encoding="utf-8") as f:
+                                f.write(f"--- Detected Label ---\n{canonical_label}: {caption_body}\n\n")
+                                f.write(f"--- Extracted Model Description ---\n{vision_description}\n")
+                            
+                            b["text"] = (
+                                f"\n\n=========================================\n"
+                                f"[Visual Element: {canonical_label}]\n"
+                                f"[Caption Extracted: {caption_body}]\n"
+                                f"[Vision Model Comprehensive Analysis: {vision_description}]\n"
+                                f"=========================================\n\n"
+                            )
+                            b["is_caption"] = True
+                            merged_visuals.remove(matched_visual)
+                        except Exception as e:
+                            print(f"[Warn] Render failed for {canonical_label}: {e}")
+
+            # Sort intelligently using topological column algorithm (Fixes messy text)
+            sorted_blocks = sort_text_blocks(text_blocks, page.rect.width)
+            
+            page_text = "\n\n".join([b["text"] for b in sorted_blocks])
+            full_paper_formatted_text += f"\n\n--- Page {page_num + 1} ---\n{page_text}\n\n"
+
+        documents_data[filename] = full_paper_formatted_text
         
+        safe_filename = filename.replace(".pdf", "")
+        text_dump_path = os.path.join(save_text_dir, f"{safe_filename}_extracted_text.txt")
+        try:
+            with open(text_dump_path, "w", encoding="utf-8") as dump_f:
+                dump_f.write(full_paper_formatted_text)
+        except Exception as e:
+            print(f"Skipped saving text dump: {e}")
+            
     return documents_data

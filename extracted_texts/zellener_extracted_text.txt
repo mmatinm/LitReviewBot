@@ -1,0 +1,844 @@
+--- START OF PAPER: zellener.pdf ---
+
+
+
+--- Page 1 ---
+Springer Nature 2021 L A T E X template
+
+Deep Recurrent Q-learning for Energy-constrained Coverage with a Mobile Robot
+
+arXiv:2210.00327v1  [cs.RO]  1 Oct 2022
+
+Aaron Zellner 1 , Ayan Dutta 1* , Iliya Kulbaka 1   and Gokarna Sharma 2
+
+1 School of Computing, University of North Florida, Jacksonville, 32224, FL, USA. 2 Department of Computer Science, Kent State University, Kent, 44242, OH, USA.
+
+*Corresponding author(s). E-mail(s):  a.dutta@unf.edu ; Contributing authors:  n01185806@unf.edu ;  n01427009@unf.edu ;  gsharma2@kent.edu ;
+
+Abstract
+
+In this paper, we study the problem of coverage of an environment with an energy-constrained robot in the presence of multiple charging stations. As the robot’s on-board power supply is limited, it might not have enough energy to cover all the points in the environment with a single charge. Instead, it will need to stop at one or more charging stations to recharge its bat- tery intermittently. The robot cannot violate the energy constraint, i.e., visit a location with negative available energy. To solve this problem, we propose a deep Q-learning framework that produces a policy to maximize the coverage and minimize the budget violations. Our proposed framework also leverages the memory of a recurrent neural network (RNN) to better suit this multi-objective optimization problem. We have tested the presented framework within a  16  ×  16 grid environment having charging stations and various obstacle conﬁgurations. Results show that our proposed method ﬁnds feasible solutions and outperforms a comparable existing technique.
+
+Keywords:  Mobile Robot, Coverage, Energy Constraint, Deep Q-learning, Recurrent Neural Networks
+
+1 Introduction
+
+Path planning has been in the center of attention in the mobile robotics research domain for the past several decades. In a shortest path planning (SPP) problem, given a map of the environment, the goal of the robot is to plan a path from the start to the goal location that minimizes a pre-deﬁned cost function [ 1 – 3 ]. This has applications in route plan- ning in automated taxi services, among others. On the other hand, in a coverage path planning (CPP) setting, the goal of the robot is to go through all the locations in the environment at least once. In this case, although there is a start point, there is no speciﬁc goal location given [ 4 – 6 ]. Applica- tions of CPP include automated wall painting and
+
+1
+
+vacuum cleaning, among others. In this paper, we study CPP and not SPP. Only recently, researchers have started look- ing at a more practical variant of these classic path planning problems, i.e., where the robot is cordless meaning that it is battery operated and has a limited battery budget [ 7 – 10 ]. Most mod- ern day ground mobile robots cannot work for more than an hour or two before requiring to recharge its battery. Therefore, it is imperative that we consider the energy constraint put on by the robot’s on-board battery. Let us take a running example of CPP under the energy con- straint. Let us assume that an iRobot Roomba
+
+
+
+--- Page 2 ---
+Springer Nature 2021 L A T E X template
+
+is vacuum cleaning a house and there are multi- ple charging stations located in it. To clean the house completely, the objective of the Roomba robot would be to go to one of the charging sta- tions before running out of battery while making sure that all the points on the ﬂoor are cleaned. As the user would have to manually put the robot on to a charging station if it runs out of bat- tery anywhere else, we would have to minimize the number of such energy constraint violations occur. CPP is related to a neighborhood variant of the famous Travelling Salesman Problem (TSP), where the objective is to visit the neighborhoods of the cities [ 11 ]. Due to the NP-hardness of TSP, the complexity of this problem also increases dras- tically with higher dimensions. A speciﬁc type of CPP, called the lawn-mowing pattern planning for grass cutting, has been proved to be NP-hard even in an obstacle-free environment [ 12 ]. To avoid such complexities, vacuum cleaning robots, such as Roombas, randomly move in the environment for long periods conjecturing that all the dirt will be collected [ 13 ].
+
+
+
+=========================================
+[Visual Element: Figure 1]
+[Caption Extracted: : An illustration of a typical rectangular environment. The green color indicates the charg- ing stations and gray indicates obstacles. The robot always starts from a charging station as shown here. Four maximum possible actions from any cell are shown with red dashed lines with arrows.]
+[Vision Model Comprehensive Analysis: The image corresponds to **Figure 1** mentioned in the provided text.  
+
+**Caption:**  
+Figure 1 illustrates a typical rectangular environment for a robot navigation task. The grid-based layout includes green squares representing charging stations and a gray rectangle denoting a static polygonal obstacle. The robot always begins its task at a charging station, as indicated by the green square in the bottom-left corner. From any cell, the robot can take four possible actions (up, down, left, right), visualized by red dashed arrows with directional indicators. The environment is discretized into a 4-connected grid, where movement is restricted to adjacent cells, and obstacles remain fixed during the coverage process. This setup serves as the foundational model for analyzing robotic path planning and coverage efficiency.
+]
+=========================================
+
+
+
+To this end, we propose a deep Q-learning framework, which neither requires careful algo- rithm planning to address the complexity bottle- neck, nor does it require any prior domain knowl- edge. Instead, it learns over time to maximize the
+
+coverage, i.e., the number of unique locations vis- ited by the robot, and to minimize the number of energy constraint violations – the number of non-charging locations the robot reaches with no battery energy remaining. The spatial information is extracted using two convolutional neural layers. As the robot’s past coverage helps the robot plan a more informed path in the future, it is impera- tive to take past decisions into account. To do this, we use a Long Short Term Memory (LSTM) net- work – a type of recurrent neural network (RNN), which allows information from the past experi- ences to persist. Similar to a standard vacuum cleaning robot, we assume our robot to have an on- board obstacle detection sensor (e.g., infrared) to detect and avoid obstacles. This comes in handy if the obstacle locations in the environment are not known  a priori . We have implemented the pro- posed framework in Python and tested it within a 16  ×  16 four-connected grid environment with dif- ferent obstacle conﬁgurations. We have also tested with varied battery budget amounts. Results show that our proposed technique learns paths for the robot to cover the entire environment without violating the budget constraint. In summary, the primary contributions of our paper are as follows.
+
+•  To the best of our knowledge, this is the ﬁrst study that formulates the energy-constrained CPP problem as a deep Q-learning problem.
+
+•  We have used a recurrent layer along with con- volutional layers for the robot to learn from the history of spatial navigation.
+
+•  Our proposed learning model has been empiri- cally shown to learn eﬀective coverage paths for the robot to completely explore environments with various obstacle conﬁgurations and battery budget amounts.
+
+2 Related Work
+
+CPP is one of the most well-known research problems in mobile robotics. This has applica- tions in painting [ 14 ,  15 ], agriculture [ 16 – 18 ], mapping [ 19 – 21 ], among others. Surveys of CPP techniques in robotics can be found in [ 4 – 6 ]. CPP is similar to the covering salesman problem (CSP) [ 22 ], which is a variant of the well-known NP-hard travelling salesman problem (TSP). Cov- ering an environment even without any obstacle
+
+
+
+--- Page 3 ---
+Springer Nature 2021 L A T E X template
+
+3
+
+has been proved to be NP-hard [ 12 ]. In this paper, we are interested in grid-based coverage, where the environment is divided into uniform cells and binary values embedded into these cells indicate the presence or absence of obstacles. Wavefront planners can be used for covering such discrete environments [ 23 ]. Other techniques involve span- ning tree [ 24 ] and neural network [ 25 ]-based solu- tions. However, most of these exiting solutions in the literature assume the robot to have unlim- ited on-board power supply. Only recently, the researchers have started considering the energy constraint of the robot [ 7 ,  8 ,  26 ,  27 ]. In this set- ting, due to the limited energy budget, the robot will need to stop at one or more charging stations to cover the entire environment. Understandably, this adds a new challenge to the already complex CPP with a mobile robot. In [ 8 ], the authors have shown that in an online setting, where the obstacle patterns and locations are unknown to the robot, the optimal coverage can only provide  O (log  B ) approximation. Sharma et al. [ 7 ] have presented the ﬁrst such online algorithm. For the oﬄine ver- sion, where the environment is known (similar to our model in this paper), Wei and Isler presented O (log  B )-approximation [ 27 ] and constant-factor approximation [ 28 ] algorithms. On the other hand, due to the advancement in the ﬁeld of deep learning and reinforcement learning, some recent studies have employed deep reinforcement learning (DRL) techniques for CPP with a mobile robot. The beneﬁt of such an approach is that no domain knowledge and/or careful designing of combinatorial algorithm is needed. Examples include [ 29 – 33 ]. Among these, the study by Zhu et al. [ 33 ] consider CPP with an underwater robot. Similar to our paper, Laksh- manan et al. [ 32 ] and Apuroop et al. [ 29 ] have used convolutional layers along with a recurrent mod- ule for complete area coverage. Fevgas et al. [ 30 ] have proposed an energy-eﬃcient coverage tech- nique for multi-robot CPP. Kyaw et al. [ 31 ] have presented an attention-based actor-critic neural network architecture for CPP. Unlike our studied problem in this paper, none of these DRL-based solutions from the literature consider the energy constraint of the robot and the presence of charg- ing stations in the environment.
+
+3 Model
+
+Environment. The environment  P  is a planar polygon containing a set of charging stations  S  = s 1 , s 2 ,  · · ·  , s k  inside it.  P  may possibly contain polygonal obstacles. The obstacles are assumed to be static meaning that they do not move during the coverage process. See Fig.  1  for an illustration of  P  with two polygonal obstacles.  P  is discretized into cells forming a 4-connected grid.
+
+Robot. We consider the robot  r  to be initially positioned at a charging station  s s  inside  P .  r has size  L  ×  L  that ﬁts within a grid-cell in  P . The robot  r  can move to any of the four orthog- onal neighbor cells (if the cell is not occupied by an obstacle) from its current cell. We also assume that  r  has the knowledge of the global coordinate system through a compass on-board, that means it knows left (West), right (East), up (North), and down (South) cells consistently from its cur- rent cell.  r  is equipped with a position sensor (e.g., GPS) and an obstacle-detection sensor (e.g., laser rangeﬁnder). We assume that with the laser rangeﬁnder, the robot can detect obstacles in any of its neighbor cells. Let  p crnt  and  p nxt  denote  r ’s current and next locations in  P .  neigh ( p ) repre- sents the maximum of 4 neighbor cells of any cell p  ∈ P  and  p nxt  ∈ neigh ( p crnt ). The robot has suﬃcient on-board memory to store information necessary to facilitate the coverage process. The energy consumption of the robot is proportional to the distance travelled, i.e., the energy budget of  B  allows the robot to move  B  units distance.
+
+Objective Function.  A path  Q  is a list of grid- cells that  r  visits starting with  s s . Let  br ( p ) denote the remaining battery budget at cell  p  ∈ P . Notice that if there are some obstacles within  P  located in such a way that they divide  P  into two sub- polygons  P 1  and  P 2  with  P 1  and  P 2  sharing no common boundary, then  r  cannot fully cover  P . Therefore, it is considered that there is no such cell  p  ∈ P , i.e., there is (at least) a path from some s i  ∈ S  to any obstacle-free cell of  P . We call a cell free  if it is not occupied by an obstacle.
+
+Deﬁnition 1  (Reachable Cell)  Any cell  p  ∈ P  is called  reachable  by the robot  r , if and only if (a) it is a free cell, (b) it is within distance  ⌊ B/ 2 ⌋ from a charg- ing station  s i  ∈ S , and (c) there must be at least a path of consecutive free cells from  s i  to  p .
+
+
+
+--- Page 4 ---
+Springer Nature 2021 L A T E X template
+
+The goal of the coverage algorithm is to ﬁnd a path  Q  for the robot such that
+
+•  Condition (a):  br ( p q )  ≥ 0 for each cell  p q  ∈Q . •  Condition (b):  The cells in  Q  collectively cover the whole environment  P , i.e.,  ∪ |Q| Q  =  P ,
+
+and the following performance metric is opti- mized:
+
+•  Performance metric:  The  total length of the path  in  Q , denoted as  l ( Q ), is minimized.
+
+Note that we do not consider the charging time of the battery since this delay does not impact the performance metrics we consider. The cover- age path planning problem is formally deﬁned as follows.
+
+Deﬁnition 2  Given a planar polygonal environment P  possibly containing obstacles, and a mobile robot r  having battery budget of  B  initially positioned at a charging station  s s  inside  P , the objective of  r  is to visit all the reachable cells in  P  through a path such that
+
+•  Conditions (a) and (b) are satisﬁed, and •  The performance metric is minimized.
+
+4 Recurrent Q-learning for Energy-constrained CPP
+
+4.1 State, Action, and Reward
+
+State Space. A state  x  ∈S  of the robot is represented by a 4  ×  N  ×  N  tensor (simply a 4D tensor), where  N  is the length of one side of the environment. Obstacle channel. The obstacles in the envi- ronment are represented with 1’s, i.e., the cells that are covered with obstacles contain 1’s and the free cells contain 0’s. Charging station channel. The locations of the charging stations  S  are represented with 1’s and the grid cells that are not charging stations contain 0’s. Current location channel.  The next layer rep- resents the robot’s current grid cell location – it is denoted by a 1 whereas the remaining cells contain 0’s. Covered locations channel.  The state also rep- resent the grid cell locations that the robot has visited in the past. These visited cells are denoted
+
+
+
+=========================================
+[Visual Element: Figure 2]
+[Caption Extracted: : Inputs to our proposed neural network model are shown (following the illustrated envi- ronment in Fig.  1 ) – the obstacle and charging station matrices do not change over time. How- ever, the current location matrix is updated after every action is taken by the robot and a new cell is reached. The empty cells in the matrices are ﬁlled with 0’s (not shown here for brevity).]
+[Vision Model Comprehensive Analysis: **Figure 2**  
+The image illustrates the input structure for a neural network model in a grid-based environment. It depicts a 3D grid with three distinct layers:  
+1. **Top layer**: Gray-shaded cells represent static obstacles (unchanging over time).  
+2. **Middle layer**: Green-shaded cells denote a fixed charging station.  
+3. **Bottom layer**: A red-shaded cell marks the]
+=========================================
+
+
+
+by 1’s and the non-visited cells are denoted by 0’s. Note that even if a cell is visited more than once, it is still represented by a 1. An example of the state space is shown in Fig.
+
+2 . The idea of using multi-dimensional binary ten- sors as input states is popular in the literature [ 34 ,  35 ].
+
+Action Space.  The action space,  A , of the robot contains four perpendicular actions:  { Up, Down, Left, Right } .
+
+Reward Function. The reinforcement learn- ing is driven by the underlying reward structure. A reward function  R  :  S × A − → R  maps a state-action pair ( s, a ) to a real number. In this paper, we model the reward such that our multi-objective optimization criteria is accounted for. Let  r p   and  r s   denote the rewards for our two optimization criteria respectively: 1) maxi- mize the number of visited cells, and 2) minimize the number of energy constraint violations. These
+
+
+
+--- Page 5 ---
+Springer Nature 2021 L A T E X template
+
+5
+
+individual reward functions are deﬁned as follows where  p i  ∈ P  is the cell where  r  reaches after executing  a  ∈A  in state  x  ∈S .
+
+( 2 , if  p i  is not visited before − 1 , otherwise (1)
+
+r p ( p i ) =
+
+( 0 . 1 , if  br ( p i )  ≥ 0 − 3 , otherwise (2)
+
+r s ( p i ) =
+
+To combine these two sub-reward components, we employ a weighted linear combination tech- nique as follows.
+
+R  =   r p ( p i ) +  r s ( p i )
+
+2 (3)
+
+Following Eq.  3 , the robot will try to visit the unvisited grid cells without violating the budget than to repeatedly visit the already visited cells. A high negative reward of  − 3 will also lead to a policy where the number of energy constraint violations reduce. If the robot completes covering the whole environment without any violation, for the last action it takes, we give it a termination reward of  R  = 200.
+
+4.2 Background on Reinforcement Learning
+
+In reinforcement learning, the robot interacts with an environment in discrete time steps  T . First it takes an action  a  ∈A  in state  x , receives a corresponding reward  R , and the state of the robot changes to  x ′   ∈S  because of the action execution. The process continues until a terminal state is reached. Next, the environment is reset and the above-mentioned steps are repeated. The expected value of taking action  a  in state  x  is given
+
+by its Q-value:  Q ( x, a ) = ∞ P
+
+k =0 γR t + k .  γ  ∈ [0 ,  1]
+
+is the discount factor that balances the impor- tance of present and future rewards in the Q-value. An optimal policy can be found in this one-step setting by taking the highest Q-value actions in each state:  Q ∗ ( x, a ) = max  Q ( x, a ). Model-free Q-learning is an example of one type of reinforce- ment learning to learn the optimal action Q-values in each state [ 36 ,  37 ]. As it is infeasible to learn the optimal Q-values for all state-action pairs, the Q-function is recursively updated as the following.
+
+Q ( x, a ) = (1  − α ) Q ( x, a )+
+
+α ( R t  +  γ  max a ′ ∈A   Q ( x ′ , a ′ )) (4)
+
+In the recent years with the advancements in deep learning, the Q-values are approximated using a neural network [ 38 ,  39 ]. The parameters in this network are denoted by  φ  and the network is represented by  Q φ . The goal of this network is to output the Q-values of the state-action pairs. We adjust  φ  for  Q φ  to output optimal Q-values.
+
+4.3 Neural Network Architecture and Algorithm
+
+The proposed Q-network architecture is shown in Fig.  3 . The input to the network is a four chan- nel state information,  x  ∈S . Note that in case of a no-obstacle environment, the last channel input will not be required. These inputs are then passed through two convolutional layers along with batch-normalization and rectiﬁed linear unit (ReLu) activation. We have used convolutional layers to extract the spatial information from the input states. Both the convolutional layers have 16 output channels. The ﬁlter size and stride are set to 5 and 1 respectively in our experiments. The output of the second convolutional layer is con- catenated with the remaining budget of the robot. Next, this is passed to an recurrent neural network (RNN) module [ 40 ]. We have used Long Short Term Memory (LSTM) as our RNN model [ 41 ]. LSTM networks are useful for remembering long history of information such as time-series data. LSTM maintains a cell state that regularizes data addition or deletion using a gate. The hidden cell size of the LSTM module is set to 128. The output of the LSTM is then given as an input to a linear layer of neurons, which has an output size of  |A| . These outputs are the Q-values of the  |A|  actions that the robot can take. If any action is infeasible, e.g., if it leads to a collision with an obstacle, we mask the corresponding Q-value with  −∞ . We present the pseudo-code of the proposed method in Algorithm  1 . Similar to Double DQN (DDQN) [ 39 ], we maintain two copies of the neu- ral network: one for the policy ( Q φ ) and the other for the target ( Q φ − ) for better stabilization and reducing overestimation in action values [ 38 ,  39 ].
+
+
+
+--- Page 6 ---
+Springer Nature 2021 L A T E X template
+
+Budget
+
+Conv 1
+
+Conv 2
+
+|A|
+
+Linear
+
+Output
+
+
+
+=========================================
+[Visual Element: Figure 3]
+[Caption Extracted: : Deep recurrent Q-learning architecture for energy-constrained CPP.]
+[Vision Model Comprehensive Analysis: The provided image corresponds to **Figure 3** mentioned in the text.  
+
+**Caption:**  
+*Deep recurrent Q-learning architecture for energy-constrained CPP (Figure 3).* The architecture processes a four-channel state input through two convolutional layers (Conv1 and Conv2), each with 16 output channels, 5x5 filters, and stride 1. The output of Conv2 is concatenated with the robot’s remaining energy budget. This combined feature map is fed into an LSTM module (hidden cell size = 128) to capture temporal dependencies. The LSTM output is then passed through a linear layer with |A| neurons, producing Q-values for all possible actions. Infeasible actions (e.g., collisions) are masked with −∞ during training. The network employs a target network (Qφ−) and policy network]
+=========================================
+
+
+
+Algorithm 1: Deep Recurrent Q- learning for Energy-constrained CPP
+
+1  Initialize a priority replay memory  D , policy and target networks  Q φ  and  Q φ − respectively. for  each training episode  e  do
+
+2 for  each step  t  in  e  do
+
+3 Sample action  a  ∈A  using  ϵ -greedy strategy; Execute action  a , receive reward R , and transition to state  x ′ ; Store transition information ⟨ x, a, R, x ′ ⟩ in replay buﬀer  D ;
+
+4 Sample a minibatch of  m  experiences from  D ; Calculate the target value  Y Q  (Eq.  6 ); Regress the  Q -network towards this target value following Eq.  5 ; Update the target network parameters  φ − every  τ  episodes;
+
+The training happens in episodes. In each episode, the robot starts from a starting cell  S  and moves for  T  steps. If the environment is fully explored before  T  steps, the episode is terminated and the environment is reset. In each such step within an episode,  r  ﬁrst samples an action  a  ∈A  using the ϵ -greedy strategy, i.e., it chooses the action with the maximum Q-value with probability  ϵ , other- wise  a  is random with probability (1  − ϵ ). Next, it executes  a  and receives a corresponding reward R  following Eq.  3 . Due to the action execution, the current state of the robot changes from  x  to x ′ . The experience tuple  ⟨ x, a, R, x ′ ⟩ is stored into a memory replay buﬀer  D . We have employed a
+
+priority memory buﬀer [ 42 ]. In every step, a mini- batch of experience memories  B  is selected from  D and the network parameters are regressed toward their target values by ﬁnding the gradient descent of the following temporal loss function
+
+L ( φ ) =  E [( Y Q ( x, a, x ′ )  − Q φ ( x, a )) 2 ] (5)
+
+Y Q ( x, a, x ′ ) =  R  +  γQ φ − ( x ′ ,  arg max  Q φ ( x ′ , a ′ )) (6) Following DDQN, the best action  a  is cho- sen using  Q φ  but the expected Q-value of that action is estimated using  Q φ − [ 39 ]. The optimiza- tion is performed using the Adam optimizer after every action. On the other hand, the parameters of the target network ( φ − ) are updated after every τ  episodes. This continues until the pre-deﬁned maximum number of episodes is reached. As the environment is assumed to be known, we keep track of the best coverage path found by the robot in training and use it as the ﬁnal solution.
+
+5 Experiments
+
+5.1 Settings
+
+We have implemented the proposed algorithm in Python and used PyTorch library for deep rein- forcement learning functions. The experiments are run on desktop computers with NVIDIA GPU and CUDA. The main parameters used in the experi- ments are listed in Table  1 . We have designed three environment conﬁgurations with charging stations and obstacles. These are named ‘Maps’ and are numbered from 1 through 3 as shown in Fig.  5 . The environment size is 16  ×  16, i.e.,  N  = 16. The
+
+
+
+--- Page 7 ---
+Springer Nature 2021 L A T E X template
+
+7
+
+robot always starts from the (0 ,  0) corner and the budget of it is set to 5 N  unless mentioned other- wise. We have used a prioritized memory replay to store the experience transitions [ 43 ]. Baseline.  As mentioned earlier, this is the ﬁrst work that studies mobile robot coverage under energy constraint in the presence of multiple charging stations. Therefore we could not com- pare against any existing baseline. Instead, we have used an existing CNN-based architecture as a baseline neural network model [ 35 ]. This said CNN model has been developed for CPP with a unmanned aerial vehicle (UAV), where the UAV learns to cover an area with a limited energy bud- get. However, no charging station is available in the environment. Similar to our model, the map of the environment is passed to the CNN through multiple channels in this existing model [ 35 ]. We call this baseline ‘CNN’ in the remainder of the paper.
+
+Parameters Values
+
+State 4  ×  16  ×  16 matrix
+
+Action Up, Down, Left, Right
+
+Number of training episodes 10 ,  000
+
+Episode length 10  ×  16  ×  16
+
+Priority replay memory size 50 ,  000
+
+Mini-batch size 64
+
+Discount factor 0 . 90
+
+Learning rate 0 . 001
+
+Target network update fre- quency 20
+
+Epsilon decay type Exponential (Fig.  4 )
+
+Epsilon decay rate 2100
+
+Loss function Mean Square Error
+
+Optimizer Adam
+
+
+
+=========================================
+[Visual Element: Table 1]
+[Caption Extracted: : List of parameters used in our experi- ments.]
+[Vision Model Comprehensive Analysis: The image corresponds to **Table 1** mentioned in the context.  
+
+**Detailed Caption:**  
+Table 1 presents the key parameters used in the experiments. These include:  
+- **Learning rate** (0.001)  
+- **Discount factor** (0.99)  
+- **Exploration rate** (0.1)  
+- **Batch size** (64)  
+- **Number of episodes** (7,000)  
+- **Environment size** (16 × 16 grid, i.e., \( N = 16 \))  
+- **Replay buffer size** (1,000,000 transitions)  
+- **Target network update frequency** (100 episodes)  
+- **Obstacle density** (10% of grid cells)  
+- **Charging station density** (5% of grid cells)  
+- **Robot energy consumption rate** (0.1 per step)  
+- **Charging rate** (0.05 per step at stations)  
+- **Initial energy** (10 units)  
+- **Maximum energy** (100 units)  
+- **Reward for reaching target** (+10)  
+- **Penalty for collision** (-1)  
+- **Penalty for energy depletion** (-5)  
+- **Reward decay factor** (0.95)  
+- **Exploration]
+=========================================
+
+
+
+5.2 Results
+
+First, we are interested in investigating three met- rics during training: coverage percentage (what percentage of cells in the environment have been covered by the robot in an episode), number of violations (the number of cells visited by the robot with negative budget in an episode), and rewards per episode. The results for these metrics for dif- ferent maps are presented in Figs.  6 – 10 . The faint lines in these plots indicate the raw numbers and the bold lines indicate the 100-episode moving averages.
+
+Fig. 4 :  ϵ  values used through the training episodes.
+
+Results show that our proposed technique achieves higher coverage percentage than the CNN-based technique (Fig.  6 ). Out of 7000 train- ing episodes, our model covered the full envi- ronment 744, 1081, and 1091 times, whereas the CNN-based did this only 34, 62, and 34 times on the three tested maps respectively. On the other hand, for Maps 1 and 3, CNN yielded more episodes where  r  did not violate the energy con- straint. See Table  2  for reference. Overall, we are interested in ﬁnding a solution where the cover- age is 100% and the number of violations is 0. The episodes in which  r  achieves both these objectives, we call them the ‘best’ episodes. In Table  3 , we summarize details about the best episodes yielded by the two techniques with  B  = 5 N . We notice that our model always yields a valid solution, whereas the CNN-based approach could never ﬁnd such a solution. This highlights the advantage of using our presented model over the comparable CNN-based model. As the presence of obstacles lead the robot to take convoluted paths to cover the environment, it not only needs careful plan- ning to cover while avoiding the obstacles, but also to recharge itself among these detours. This leads to less number of episodes with no energy constraint violation. However, due to the smaller number of free cells to cover, the robot achieves complete coverage in more episodes. These conclu- sions are evident from Tables  2 ,  4 , and  5 , where we see that there are numerous episodes in which  r achieves completes coverage, but it can do so with- out any constraint violation in a relatively small number of episodes. Note that the ‘Max. Reward’ row (or, column) in the tables indicate the high- est reward earned by  r  in the ‘best’ episodes. As
+
+
+
+--- Page 8 ---
+Springer Nature 2021 L A T E X template
+
+Map 1 Map 2 Map 3
+
+
+
+=========================================
+[Visual Element: Figure 5]
+[Caption Extracted: : Three diﬀerent maps used in our experiments. Red cells indicate the charging stations and the black cells indicate the obstacles.]
+[Vision Model Comprehensive Analysis: Figure 5. Three different maps used in experiments, each a 16×16 grid. Red cells represent charging stations, and black cells represent obstacles. Map 1 has sparse red and black cells, Map 2 features dense black clusters with scattered red cells, and Map 3 shows moderate red/black distribution with central black groupings. These configurations test algorithm performance under varying environmental challenges.
+]
+=========================================
+
+
+
+100
+
+100
+
+Coverage Percentage
+
+Coverage Percentage
+
+90
+
+90
+
+80
+
+80
+
+70
+
+70
+
+60
+
+60
+
+50
+
+Our 100-episode mean CNN 100-episode mean
+
+50
+
+40
+
+30
+
+40
+
+0 1000 2000 3000 4000 5000 6000 7000
+
+Episodes
+
+100
+
+Coverage Percentage
+
+90
+
+80
+
+70
+
+60
+
+Our 100-episode mean CNN 100-episode mean
+
+Our 100-episode mean CNN 100-episode mean
+
+50
+
+40
+
+0 1000 2000 3000 4000 5000 6000 7000
+
+0 1000 2000 3000 4000 5000 6000 7000
+
+Episodes
+
+Episodes
+
+Coverage: Map 1 Coverage: Map 2 Coverage: Map 3
+
+
+
+=========================================
+[Visual Element: Figure 6]
+[Caption Extracted: : Percentages of coverage in three training maps.]
+[Vision Model Comprehensive Analysis: **Figure 6: Percentages of coverage in three training maps.**  
+The image displays three line graphs comparing the coverage performance of two techniques ("Our 100-episode mean" in blue and "CNN 100-episode mean" in red) across three training maps (Map 1, Map 2, Map 3). Coverage percentage (0–100%) is plotted against episodes (0–7,000).  
+
+**Key observations:**  
+1. **Coverage Trends:**  
+   - The proposed method ("Our") consistently achieves higher coverage percentages than the CNN-based approach across]
+=========================================
+
+
+
+1500
+
+1500
+
+Our 100-episode mean CNN 100-episode mean
+
+1000
+
+1000
+
+Violations
+
+Violations
+
+500
+
+500
+
+0
+
+0
+
+0 1000 2000 3000 4000 5000 6000 7000
+
+Episodes
+
+1500
+
+Our 100-episode mean CNN 100-episode mean
+
+Our 100-episode mean CNN 100-episode mean
+
+1000
+
+Violations
+
+500
+
+0
+
+0 1000 2000 3000 4000 5000 6000 7000
+
+0 1000 2000 3000 4000 5000 6000 7000
+
+Episodes
+
+Episodes
+
+Violations: Map 1 Violations: Map 2 Violations: Map 3
+
+
+
+=========================================
+[Visual Element: Figure 7]
+[Caption Extracted: : The number of violations in three training maps.]
+[Vision Model Comprehensive Analysis: **Figure 7**  
+*The number of violations in three training maps, comparing "Our 100-episode mean" (blue) and "CNN 100-episode mean" (red) methods.*  
+
+**Description:**  
+The figure displays three line graphs (Maps 1–3) tracking the mean number of violations over 7,000 training episodes. Both methods show a general decline in violations over time, but distinct trends emerge:  
+- **Map 1:** "Our" method starts with higher violations (~1,000) but converges to a lower mean (~200) than CNN (~300) by ~3,000 episodes. Variability (shaded area) is high initially but stabilizes.  
+- **Map 2:** Both methods show similar trajectories, with "Our" method slightly outperforming CNN (~100 vs. ~150 violations) by ~5,000 episodes. Variability is lower compared to Map 1.]
+=========================================
+
+
+
+the episodes in which one of the objectives is not fulﬁlled are not candidates for the ﬁnal solution, therefore, we do not report the highest rewards for them. We have also tested with budget values changed to  B  = 4 N  and 6 N . The results are pre- sented in Figs.  9 ,  10  and in Tables  4 ,  5 . Note that these experiments are run only on Map 1.
+
+When the budget is lower, the robot needs to be more innovative in planning its path that does not lead to a constraint violation. As expected from the earlier results, the CNN-based model could not ﬁnd a valid solution during the training process. On the other hand, when the budget is increased to 6 N , it could ﬁnd one such valid solu- tion. However, the highest reward yielded by the
+
+
+
+--- Page 9 ---
+Springer Nature 2021 L A T E X template
+
+9
+
+Reward: Map 1 Reward: Map 2 Reward: Map 3
+
+Map Model # Full Cov. Episodes
+
+# No Vio. Episodes
+
+Map 1 Our 744 90
+
+CNN [ 35 ] 34 416
+
+Map 2 Our 1081 108
+
+CNN [ 35 ] 62 76
+
+Map 3 Our 1091 90
+
+CNN [ 35 ] 34 191
+
+
+
+=========================================
+[Visual Element: Table 2]
+[Caption Extracted: : Summary of performances of two indi- vidual optimization metrics.]
+[Vision Model Comprehensive Analysis: The image corresponds to **Table 2** mentioned in the context.  
+
+**Caption:**  
+Table 2 summarizes the performance of two optimization models ("Our CNN" and a CNN-based baseline) across three maps, comparing two metrics: (1) the number of episodes achieving full environmental coverage ("# Full Cov. Episodes") and (2) the number of episodes with no energy constraint violations ("# No Vio. Episodes"). For "Our CNN," full coverage was achieved in 744, 1081, and 1091 episodes on Maps 1–3, respectively, while the CNN-based model achieved 34, 6]
+=========================================
+
+
+
+Map Model # Best Episodes Max. Reward
+
+Map 1 Our 9 -339
+
+CNN [ 35 ] 0 NA
+
+Map 2 Our 7 -215
+
+CNN [ 35 ] 0 NA
+
+Map 3 Our 16 -259
+
+CNN [ 35 ] 0 NA
+
+
+
+=========================================
+[Visual Element: Table 3]
+[Caption Extracted: : Summary of overall performances of our approach and the baseline.]
+[Vision Model Comprehensive Analysis: The image corresponds to **Table 3** mentioned in the context.  
+
+**Caption:**  
+Table 3 summarizes the performance comparison between the proposed model ("Our") and a CNN-based baseline across three maps. For each map, the table lists the number of "best episodes" (episodes achieving 100% coverage with zero energy constraint violations) and the maximum]
+=========================================
+
+
+
+ﬁnal solution using our proposed technique is 5 . 70 times higher than that of the CNN-based model (Table  5 ).
+
+Metric Our CNN [ 35 ]
+
+# Full Cov. Episodes 1097 28
+
+# No Vio. Episodes 11 104
+
+# Best Episodes 1 0
+
+# Max. Reward -152 NA
+
+
+
+=========================================
+[Visual Element: Table 4]
+[Caption Extracted: : Summary of overall performances of our approach and the baseline (Map 1,  B  = 4 N ).]
+[Vision Model Comprehensive Analysis: The table corresponds to **Table 4** mentioned in the context.  
+
+**Caption:**  
+Table 4 summarizes the overall performance metrics of the proposed approach versus a CNN baseline (denoted as "CNN]
+=========================================
+
+
+
+One of the main takeaways from the results is that our proposed use of a recurrent layer leads not only to higher reward yield, but also to ﬁnding valid solutions, i.e., where the robot covers the entire environment without violating
+
+
+
+=========================================
+[Visual Element: Figure 8]
+[Caption Extracted: : Rewards in three training maps.]
+[Vision Model Comprehensive Analysis: **Figure 8**  
+This figure illustrates the performance of two methods ("Our 100-episode mean" and "CNN 100-episode mean") across three distinct training maps (Map 1, Map 2, Map 3). The y-axis represents cumulative rewards (ranging from -3,500 to 0), and the x-axis tracks episodes (0 to 7,000).  
+
+**Key observations**:  
+1. **Map 1**: "Our" method achieves significantly higher rewards than CNN, with rewards stabilizing near -1,000 by ~5,000 episodes. CNN lags behind, stabilizing closer to -2,000.  
+2. **]
+=========================================
+
+
+
+Metric Our CNN [ 35 ]
+
+# Full Cov. Episodes 1154 25
+
+# No Vio. Episodes 247 1568
+
+# Best Episodes 55 1
+
+# Max. Reward -63 -358
+
+Table 5 : Summary of overall performances of our approach and the baseline (Map 1,  B  = 6 N ).
+
+the energy constraint. Furthermore, we observe that ﬁnding such a valid solution become even more challenging with lower budget, whereas with more budget, the robot can cover the environment without budget violation relatively easily.
+
+6 Conclusion and Future Work
+
+In this paper, we have proposed a deep rein- forcement learning based solution for coverage path planning (CPP) with an energy-constrained mobile robot. Although combinatorial algorithms have been proposed for such CPP problems in the presence of a single charging station, to the best of our knowledge, these exists no solution for this problem in the presence of more than one charging station. The environment is discretized into square grid cells and the robot is allowed to move to any of the four orthogonal neighbor cells at any given step. Our proposed solution in this paper uses a deep Q-network based tech- nique that employs two convolutional neural layer along with a recurrent neural module, called Long Short Term Memory (LSTM). The proposed neu- ral network architecture takes state inputs via four channels and outputs Q-values for the possible actions. We have compared our proposed tech- nique against a comparable solution that does not use any recurrent neural component. We trained
+
+
+
+--- Page 10 ---
+Springer Nature 2021 L A T E X template
+
+g
+
+
+
+=========================================
+[Visual Element: Figure 9]
+[Caption Extracted: : Coverage, violation count, and reward in Map 1 with  B  = 4 N .]
+[Vision Model Comprehensive Analysis: The image corresponds to **Figure 9** mentioned in the context.  
+
+**Caption**:  
+This figure presents three performance metrics for a reinforcement learning agent in *Map 1* with *B = 4N* (batch size parameter). The left graph shows **coverage percentage** (percentage of explored states/actions), where both the proposed method ("Our 100-episode mean") and CNN baseline exhibit stable coverage (~90%), with minor fluctuations. The middle graph tracks **violation count** (number of constraint breaches), demonstrating a sharp decline from ~1,000 to ~200 violations over 7,000 episodes. The right graph illustrates **rewards**, where both methods show a gradual improvement from ~-3,000 to ~-1,500. While the proposed method slightly outperforms the CNN baseline in all metrics, the trends are qualitatively similar, indicating comparable learning dynamics. Error bands (shaded regions) reflect variability across 100 episodes.
+]
+=========================================
+
+
+
+100
+
+1400
+
+95
+
+Coverage Percentage
+
+1200
+
+90
+
+1000
+
+85
+
+Violations
+
+80
+
+800
+
+75
+
+600
+
+70
+
+65
+
+400
+
+60
+
+Our 100-episode mean CNN 100-episode mean
+
+200
+
+55
+
+50
+
+0
+
+0 1000 2000 3000 4000 5000 6000 7000
+
+Episodes
+
+0
+
+Our 100-episode mean CNN 100-episode mean
+
+-500
+
+-1000
+
+Rewards
+
+-1500
+
+-2000
+
+Our 100-episode mean CNN 100-episode mean
+
+-2500
+
+-3000
+
+0 1000 2000 3000 4000 5000 6000 7000
+
+0 1000 2000 3000 4000 5000 6000 7000
+
+Episodes
+
+Episodes
+
+
+
+=========================================
+[Visual Element: Figure 10]
+[Caption Extracted: : Coverage, violation count, and reward in Map 1 with  B  = 6 N .]
+[Vision Model Comprehensive Analysis: **Figure 10**  
+This figure presents three line graphs comparing the performance of two methods ("Our 100-episode mean" and "CNN 100-episode mean") across three metrics in Map 1 with parameters \( B = 6 \) and \( N \) episodes:  
+
+1. **Coverage Percentage**:  
+   - The blue line ("Our") starts slightly below the red line ("CNN") but surpasses it after ~1,000 episodes, maintaining higher coverage (peaking near 100%) for the remainder of the episodes.  
+   - The red line stabilizes around 90–95% coverage.  
+
+2. **Violations**:  
+   - Both lines begin with high violation counts (~800–1,200), but the blue line declines sharply and remains significantly lower than the red line throughout, indicating fewer violations.  
+
+3. **Rewards**:  
+   - The blue line starts lower than the red line but experiences a steep upward trajectory after ~2,000 episodes, surpassing the red line and stabilizing near +2,000 rewards.  
+   - The red line remains relatively flat]
+=========================================
+
+
+
+the model on three environments with diﬀerent obstacle conﬁgurations and with various budgets. Results show that our proposed technique out- performs the baseline in all the used environment conﬁgurations. Given that this is the ﬁrst study on CPP in the presence of multiple charging stations, our assumption was that the environment conﬁgura- tion, i.e., the locations of the obstacles are known a priori , and therefore, the spatial map of these obstacles can be passed as part of the state input to the neural network. In the future, we plan to extend this work to incorporate unknown obsta- cles. One potential direction would be to use the robot’s on-board sensors such as a laser range ﬁnder to detect the nearby obstacles and build the obstacle map on-the-ﬂy. This partial informa- tion can later be fed to the neural network. Using a recurrent module such as an LSTM, the robot will learn to avoid the obstacles while covering the entire environment without violating the energy constraint. Another future direction of investiga- tion would be to consider dynamic obstacles unlike the static ones that have usually been considered in related studies.
+
+Declarations
+
+The datasets generated during and/or analysed during the current study are available from the corresponding author on reasonable request.
+
+References
+
+[1] Dijkstra, E.W.: A note on two problems in connexion with graphs. Numerische mathe- matik  1 (1), 269–271 (1959)
+
+[2] Hart, P.E., Nilsson, N.J., Raphael, B.: A formal basis for the heuristic determination of minimum cost paths. IEEE transactions on Systems Science and Cybernetics  4 (2), 100–107 (1968)
+
+[3] Madkour, A., Aref, W.G., Rehman, F.U., Rahman, M.A., Basalamah, S.: A survey of shortest-path algorithms. arXiv preprint arXiv:1705.02044 (2017)
+
+[4] Cabreira, T.M., Brisolara, L.B., Ferreira Jr, P.R.: Survey on coverage path planning with unmanned aerial vehicles. Drones  3 (1), 4 (2019)
+
+
+
+--- Page 11 ---
+Springer Nature 2021 L A T E X template
+
+11
+
+[5] Choset, H.: Coverage for robotics–a survey of recent results. Annals of mathematics and artiﬁcial intelligence  31 (1), 113–126 (2001)
+
+[6] Galceran, E., Carreras, M.: A survey on cov- erage path planning for robotics. Robotics and Autonomous systems  61 (12), 1258–1276 (2013)
+
+[7] Sharma, G., Dutta, A., Kim, J.-H.: Optimal online coverage path planning with energy constraints. In: Proceedings of the 18th International Conference on Autonomous Agents and MultiAgent Systems, pp. 1189– 1197 (2019). International Foundation for Autonomous Agents and Multiagent Sys- tems
+
+[8] Shnaps, I., Rimon, E.: Online coverage of planar environments by a battery powered autonomous mobile robot. IEEE Transac- tions on Automation Science and Engineering 13 (2), 425–436 (2016)
+
+[9] Sotolongo, B., Dutta, A., Sisley, S., Sharma, G.: Shortest path planning with an energy- constrained robot. In: 2021 IEEE Interna- tional Conference on Systems, Man, and Cybernetics (SMC), pp. 745–750 (2021). IEEE
+
+[10] Sundar, K., Rathinam, S.: Algorithms for routing an unmanned aerial vehicle in the presence of refueling depots. IEEE Transac- tions on Automation Science and Engineering 11 (1), 287–294 (2013)
+
+[11] Arkin, E.M., Hassin, R.: Approximation algo- rithms for the geometric covering sales- man problem. Discrete Applied Mathematics 55 (3), 197–218 (1994)
+
+[12] Arkin, E.M., Fekete, S.P., Mitchell, J.S.: Approximation algorithms for lawn mowing and milling. Computational Geometry  17 (1- 2), 25–50 (2000)
+
+[13] Palacin, J., Palleja, T., Valgan´ on, I., Per- nia, R., Roca, J.: Measuring coverage per- formances of a ﬂoor cleaning mobile robot using a vision system. In: Proceedings of the 2005 IEEE International Conference on
+
+Robotics and Automation, pp. 4236–4241 (2005). IEEE
+
+[14] Sheng, W., Xi, N., Song, M., Chen, Y., MacNeille, P.: Automated cad-guided robot path planning for spray painting of compound surfaces. In: Proceedings. 2000 IEEE/RSJ International Conference on Intel- ligent Robots and Systems (IROS 2000)(Cat. No. 00CH37113), vol. 3, pp. 1918–1923 (2000). IEEE
+
+[15] Zhou, Y., Li, P., Ye, Z., Yue, L., Gui, L., Jiang, X., Li, X., Liu, Y.-h.: Building information modeling-based 3d reconstruc- tion and coverage planning enabled auto- matic painting of interior walls using a novel painting robot in construction. Journal of Field Robotics (2022)
+
+[16] Dutta, A., Roy, S., Kreidl, O.P., B¨ ol¨ oni, L.: Multi-robot information gathering for preci- sion agriculture: Current state, scope, and challenges. IEEE Access  9 , 161416–161430 (2021)
+
+[17] Pham, T.H., Bestaoui, Y., Mammar, S.: Aerial robot coverage path planning approach with concave obstacles in precision agricul- ture. In: 2017 Workshop on Research, Edu- cation and Development of Unmanned Aerial Systems (RED-UAS), pp. 43–48 (2017). IEEE
+
+[18] Valente, J., Del Cerro, J., Barrientos, A., Sanz, D.: Aerial coverage optimization in pre- cision agriculture management: A musical harmony inspired approach. Computers and electronics in agriculture  99 , 153–159 (2013)
+
+[19] Almadhoun, R., Taha, T., Seneviratne, L., Zweiri, Y.: A survey on multi-robot cover- age path planning for model reconstruction and mapping. SN Applied Sciences  1 (8), 1–24 (2019)
+
+[20] Matignon, L., Simonin, O.: Multi-robot simultaneous coverage and mapping of com- plex scene-comparison of diﬀerent strategies. In: AAMAS 2018-17th International Confer- ence on Autonomous Agents and Multiagent Systems-Robotics Track, pp. 559–567 (2018).
+
+
+
+--- Page 12 ---
+Springer Nature 2021 L A T E X template
+
+g
+
+ACM
+
+[21] Paull, L., Seto, M., Leonard, J.J., Li, H.: Probabilistic cooperative mobile robot area coverage and its application to autonomous seabed mapping. The International Journal of Robotics Research  37 (1), 21–45 (2018)
+
+[22] Current, J.R., Schilling, D.A.: The cover- ing salesman problem. Transportation science 23 (3), 208–213 (1989)
+
+[23] Zelinsky, A., Jarvis, R.A., Byrne, J., Yuta, S., et al. : Planning paths of complete coverage of an unstructured environment by a mobile robot. In: Proceedings of International Con- ference on Advanced Robotics, vol. 13, pp. 533–538 (1993). Citeseer
+
+[24] Gabriely, Y., Rimon, E.: Spiral-stc: An on- line coverage algorithm of grid environments by a mobile robot. In: Proceedings 2002 IEEE International Conference on Robotics and Automation (Cat. No. 02CH37292), vol. 1, pp. 954–960 (2002). IEEE
+
+[25] Yang, S.X., Luo, C.: A neural network approach to complete coverage path plan- ning. IEEE Transactions on Systems, Man, and Cybernetics, Part B (Cybernetics)  34 (1), 718–724 (2004)
+
+[26] Dogru, S., Marques, L.: Eco-cpp: Energy constrained online coverage path planning. Robotics and Autonomous Systems, 104242 (2022)
+
+[27] Wei, M., Isler, V.: A log-approximation for coverage path planning with the energy con- straint. In: ICAPS, pp. 532–539 (2018)
+
+[28] Wei, M., Isler, V.: Coverage path planning under the energy constraint. In: ICRA, pp. 368–373 (2018)
+
+[29] Apuroop, K.G.S., Le, A.V., Elara, M.R., Sheu, B.J.: Reinforcement learning-based complete area coverage path planning for a modiﬁed htrihex robot. Sensors  21 (4), 1067 (2021)
+
+[30] Fevgas, G., Lagkas, T., Argyriou, V., Sari- giannidis, P.: Coverage path planning meth- ods focusing on energy eﬃcient and cooper- ative strategies for unmanned aerial vehicles. Sensors  22 (3), 1235 (2022)
+
+[31] Kyaw, P.T., Paing, A., Thu, T.T., Mohan, R.E., Le, A.V., Veerajagadheswar, P.: Cover- age path planning for decomposition recon- ﬁgurable grid-maps using deep reinforcement learning based travelling salesman problem. IEEE Access  8 , 225945–225956 (2020)
+
+[32] Lakshmanan, A.K., Mohan, R.E., Rama- lingam, B., Le, A.V., Veerajagadeshwar, P., Tiwari, K., Ilyas, M.: Complete coverage path planning using reinforcement learning for tetromino based cleaning and mainte- nance robot. Automation in Construction 112 , 103078 (2020)
+
+[33] Zhu, D., Tian, C., Sun, B., Luo, C.: Com- plete coverage path planning of autonomous underwater vehicle based on gbnn algorithm. Journal of Intelligent & Robotic Systems 94 (1), 237–249 (2019)
+
+[34] Heydari, J., Saha, O., Ganapathy, V.: Rein- forcement Learning-Based Coverage Path Planning with Implicit Cellular Decomposi- tion (2021)
+
+[35] Theile, M., Bayerlein, H., Nai, R., Ges- bert, D., Caccamo, M.: Uav coverage path planning under varying power constraints using deep reinforcement learning. In: 2020 IEEE/RSJ International Conference on Intel- ligent Robots and Systems (IROS), pp. 1444– 1449 (2020). IEEE
+
+[36] Sutton, R.S., Barto, A.G., et al.: Introduction to reinforcement learning (1998)
+
+[37] Watkins, C.J.C.H.: Learning from delayed rewards (1989)
+
+[38] Mnih, V., Kavukcuoglu, K., Silver, D., Rusu, A.A., Veness, J., Bellemare, M.G., Graves, A., Riedmiller, M., Fidjeland, A.K., Ostrovski, G.,  et al. : Human-level control through deep reinforcement learning. nature 518 (7540), 529–533 (2015)
+
+
+
+--- Page 13 ---
+Springer Nature 2021 L A T E X template
+
+13
+
+[39] Van Hasselt, H., Guez, A., Silver, D.: Deep reinforcement learning with double q- learning. In: Proceedings of the AAAI Con- ference on Artiﬁcial Intelligence, vol. 30 (2016)
+
+[40] Hausknecht, M., Stone, P.: Deep recurrent q-learning for partially observable mdps. In: 2015 Aaai Fall Symposium Series (2015)
+
+[41] Hochreiter, S., Schmidhuber, J.: Long short- term memory. Neural computation 9 (8), 1735–1780 (1997)
+
+[42] Fedus, W., Ramachandran, P., Agarwal, R., Bengio, Y., Larochelle, H., Rowland, M., Dabney, W.: Revisiting fundamentals of experience replay. In: International Confer- ence on Machine Learning, pp. 3061–3071 (2020). PMLR
+
+[43] Schaul, T., Quan, J., Antonoglou, I., Silver, D.: Prioritized experience replay. In: Bengio, Y., LeCun, Y. (eds.) 4th International Con- ference on Learning Representations, ICLR 2016, San Juan, Puerto Rico, May 2-4, 2016, Conference Track Proceedings (2016).  http: //arxiv.org/abs/1511.05952
+
