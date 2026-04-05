@@ -41,10 +41,8 @@ is vacuum cleaning a house and there are multi- ple charging stations located in
 =========================================
 [Visual Element: Figure 1]
 [Caption Extracted: : An illustration of a typical rectangular environment. The green color indicates the charg- ing stations and gray indicates obstacles. The robot always starts from a charging station as shown here. Four maximum possible actions from any cell are shown with red dashed lines with arrows.]
-[Vision Model Comprehensive Analysis: The image corresponds to **Figure 1** mentioned in the provided text.  
-
-**Caption:**  
-Figure 1 illustrates a typical rectangular environment for a robot navigation task. The grid-based layout includes green squares representing charging stations and a gray rectangle denoting a static polygonal obstacle. The robot always begins its task at a charging station, as indicated by the green square in the bottom-left corner. From any cell, the robot can take four possible actions (up, down, left, right), visualized by red dashed arrows with directional indicators. The environment is discretized into a 4-connected grid, where movement is restricted to adjacent cells, and obstacles remain fixed during the coverage process. This setup serves as the foundational model for analyzing robotic path planning and coverage efficiency.
+[Vision Model Comprehensive Analysis: **Figure 1**  
+An illustration of a typical rectangular environment. The grid consists of cells colored green (charging stations) and gray (static polygonal obstacles). The robot begins at a charging station (green cell) and can move in four possible directions (up, down, left, right) as indicated by red dashed arrows. The environment is discretized into a 4-connected grid, with obstacles and charging stations represented as fixed features. This setup models a scenario where the robot navigates while avoiding obstacles and utilizing charging stations.
 ]
 =========================================
 
@@ -114,10 +112,13 @@ State Space. A state  x  ∈S  of the robot is represented by a 4  ×  N  ×  N 
 [Visual Element: Figure 2]
 [Caption Extracted: : Inputs to our proposed neural network model are shown (following the illustrated envi- ronment in Fig.  1 ) – the obstacle and charging station matrices do not change over time. How- ever, the current location matrix is updated after every action is taken by the robot and a new cell is reached. The empty cells in the matrices are ﬁlled with 0’s (not shown here for brevity).]
 [Vision Model Comprehensive Analysis: **Figure 2**  
-The image illustrates the input structure for a neural network model in a grid-based environment. It depicts a 3D grid with three distinct layers:  
-1. **Top layer**: Gray-shaded cells represent static obstacles (unchanging over time).  
-2. **Middle layer**: Green-shaded cells denote a fixed charging station.  
-3. **Bottom layer**: A red-shaded cell marks the]
+This image illustrates the input structure for a neural network model in a robot navigation task. It depicts a 3D grid environment with multiple stacked layers (time steps) showing:  
+1. **Obstacles** (gray cells) and **charging stations** (green cells), which remain static across all layers.  
+2. **Current location** (red diamond) updated dynamically after each robot action.  
+3. **Past locations** (orange diamonds) tracing the robot’s trajectory.  
+4. Empty cells (not explicitly shown) are filled with zeros.  
+The visualization emphasizes how spatial and temporal data are encoded for the model, with static environmental features contrasted against the robot’s evolving position.
+]
 =========================================
 
 
@@ -197,10 +198,10 @@ Output
 =========================================
 [Visual Element: Figure 3]
 [Caption Extracted: : Deep recurrent Q-learning architecture for energy-constrained CPP.]
-[Vision Model Comprehensive Analysis: The provided image corresponds to **Figure 3** mentioned in the text.  
+[Vision Model Comprehensive Analysis: The image corresponds to **Figure 3** mentioned in the text.  
 
 **Caption:**  
-*Deep recurrent Q-learning architecture for energy-constrained CPP (Figure 3).* The architecture processes a four-channel state input through two convolutional layers (Conv1 and Conv2), each with 16 output channels, 5x5 filters, and stride 1. The output of Conv2 is concatenated with the robot’s remaining energy budget. This combined feature map is fed into an LSTM module (hidden cell size = 128) to capture temporal dependencies. The LSTM output is then passed through a linear layer with |A| neurons, producing Q-values for all possible actions. Infeasible actions (e.g., collisions) are masked with −∞ during training. The network employs a target network (Qφ−) and policy network]
+*Deep recurrent Q-learning architecture for energy-constrained CPP (Figure 3).* The architecture processes a four-channel state input through two convolutional layers (Conv 1 and Conv 2), each with 16 output channels, 5×5 filters, and stride 1, followed by batch normalization and ReLU activation. The output of the second convolutional layer is concatenated with the robot’s remaining energy budget. This combined feature map is fed]
 =========================================
 
 
@@ -271,29 +272,11 @@ Optimizer Adam
 =========================================
 [Visual Element: Table 1]
 [Caption Extracted: : List of parameters used in our experi- ments.]
-[Vision Model Comprehensive Analysis: The image corresponds to **Table 1** mentioned in the context.  
-
-**Detailed Caption:**  
-Table 1 presents the key parameters used in the experiments. These include:  
-- **Learning rate** (0.001)  
-- **Discount factor** (0.99)  
-- **Exploration rate** (0.1)  
-- **Batch size** (64)  
-- **Number of episodes** (7,000)  
-- **Environment size** (16 × 16 grid, i.e., \( N = 16 \))  
-- **Replay buffer size** (1,000,000 transitions)  
-- **Target network update frequency** (100 episodes)  
-- **Obstacle density** (10% of grid cells)  
-- **Charging station density** (5% of grid cells)  
-- **Robot energy consumption rate** (0.1 per step)  
-- **Charging rate** (0.05 per step at stations)  
-- **Initial energy** (10 units)  
-- **Maximum energy** (100 units)  
-- **Reward for reaching target** (+10)  
-- **Penalty for collision** (-1)  
-- **Penalty for energy depletion** (-5)  
-- **Reward decay factor** (0.95)  
-- **Exploration]
+[Vision Model Comprehensive Analysis: **Table 1: List of parameters used in our experiments**  
+This table details the hyperparameters and architectural choices for a deep reinforcement learning (DRL) model implemented in Python using PyTorch. Key parameters include:  
+- **State**: A 4×16×16 matrix (likely encoding robot position, battery level, and environmental features in a 16×16 grid).  
+- **Action**: Four discrete actions (Up, Down, Left, Right).  
+- **Training episodes**: 10,0]
 =========================================
 
 
@@ -318,7 +301,14 @@ Map 1 Map 2 Map 3
 =========================================
 [Visual Element: Figure 5]
 [Caption Extracted: : Three diﬀerent maps used in our experiments. Red cells indicate the charging stations and the black cells indicate the obstacles.]
-[Vision Model Comprehensive Analysis: Figure 5. Three different maps used in experiments, each a 16×16 grid. Red cells represent charging stations, and black cells represent obstacles. Map 1 has sparse red and black cells, Map 2 features dense black clusters with scattered red cells, and Map 3 shows moderate red/black distribution with central black groupings. These configurations test algorithm performance under varying environmental challenges.
+[Vision Model Comprehensive Analysis: **Figure 5**  
+Three distinct 16×16 grid maps used in experiments to evaluate pathfinding algorithms. Red cells represent charging stations, while black cells denote obstacles.  
+- **Map 1**: Sparse distribution of red cells (charging stations) with minimal obstacles, emphasizing open space.  
+- **Map 2**: Dense clustering of red cells in the central and top-right regions, with moderate obstacles, simulating a high-demand area.  
+- **Map 3**: Highest density of red cells, particularly in the central and bottom-right regions, with obstacles strategically placed to test complex navigation.  
+The maps vary in charging station density and obstacle placement to assess algorithm performance under different environmental constraints.  
+
+*Key context*: The maps are part of experiments using Python and PyTorch for reinforcement learning, executed on NVIDIA GPU with CUDA acceleration. Environment size (N=16) and parameters are detailed in Table 1.
 ]
 =========================================
 
@@ -400,11 +390,10 @@ Coverage: Map 1 Coverage: Map 2 Coverage: Map 3
 [Visual Element: Figure 6]
 [Caption Extracted: : Percentages of coverage in three training maps.]
 [Vision Model Comprehensive Analysis: **Figure 6: Percentages of coverage in three training maps.**  
-The image displays three line graphs comparing the coverage performance of two techniques ("Our 100-episode mean" in blue and "CNN 100-episode mean" in red) across three training maps (Map 1, Map 2, Map 3). Coverage percentage (0–100%) is plotted against episodes (0–7,000).  
-
-**Key observations:**  
-1. **Coverage Trends:**  
-   - The proposed method ("Our") consistently achieves higher coverage percentages than the CNN-based approach across]
+The image displays three subplots (Map 1, Map 2, and Map 3) comparing coverage performance between a proposed technique (blue line) and a CNN-based method (red line) across 7,000 training episodes. Coverage percentage (y-axis) is plotted against episodes (x-axis). Key observations:  
+1. **Proposed technique** (blue) consistently achieves higher coverage than CNN (red) in all maps, with coverage stabilizing near 90–100% after initial fluctuations.  
+2. **Variability**: The shaded bands (representing standard deviation) are narrower for the proposed method, indicating more consistent performance.  
+3. **Key data**: For 7,000 episodes, the proposed method achieved full coverage 744, 1,081, and ]
 =========================================
 
 
@@ -464,13 +453,7 @@ Violations: Map 1 Violations: Map 2 Violations: Map 3
 =========================================
 [Visual Element: Figure 7]
 [Caption Extracted: : The number of violations in three training maps.]
-[Vision Model Comprehensive Analysis: **Figure 7**  
-*The number of violations in three training maps, comparing "Our 100-episode mean" (blue) and "CNN 100-episode mean" (red) methods.*  
-
-**Description:**  
-The figure displays three line graphs (Maps 1–3) tracking the mean number of violations over 7,000 training episodes. Both methods show a general decline in violations over time, but distinct trends emerge:  
-- **Map 1:** "Our" method starts with higher violations (~1,000) but converges to a lower mean (~200) than CNN (~300) by ~3,000 episodes. Variability (shaded area) is high initially but stabilizes.  
-- **Map 2:** Both methods show similar trajectories, with "Our" method slightly outperforming CNN (~100 vs. ~150 violations) by ~5,000 episodes. Variability is lower compared to Map 1.]
+[Vision Model Comprehensive Analysis: None]
 =========================================
 
 
@@ -509,10 +492,7 @@ CNN [ 35 ] 34 191
 =========================================
 [Visual Element: Table 2]
 [Caption Extracted: : Summary of performances of two indi- vidual optimization metrics.]
-[Vision Model Comprehensive Analysis: The image corresponds to **Table 2** mentioned in the context.  
-
-**Caption:**  
-Table 2 summarizes the performance of two optimization models ("Our CNN" and a CNN-based baseline) across three maps, comparing two metrics: (1) the number of episodes achieving full environmental coverage ("# Full Cov. Episodes") and (2) the number of episodes with no energy constraint violations ("# No Vio. Episodes"). For "Our CNN," full coverage was achieved in 744, 1081, and 1091 episodes on Maps 1–3, respectively, while the CNN-based model achieved 34, 6]
+[Vision Model Comprehensive Analysis: None]
 =========================================
 
 
@@ -539,7 +519,8 @@ CNN [ 35 ] 0 NA
 [Vision Model Comprehensive Analysis: The image corresponds to **Table 3** mentioned in the context.  
 
 **Caption:**  
-Table 3 summarizes the performance comparison between the proposed model ("Our") and a CNN-based baseline across three maps. For each map, the table lists the number of "best episodes" (episodes achieving 100% coverage with zero energy constraint violations) and the maximum]
+Table 3 summarizes the performance comparison between the proposed CNN-based model ("Our CNN") and a baseline CNN model across three tested maps. For each map, the table reports the number of "best episodes" (episodes achieving 100% environmental coverage with zero energy constraint violations) and the maximum reward earned in those episodes. Results indicate that "Our CNN" consistently identified valid solutions (e.g., 9, 7, and 16 best episodes for Maps 1, 2, and 3, respectively), while the baseline CNN failed to find any valid solutions (0 best episodes across all maps). The "Max. Reward" column highlights the highest reward achieved in the best episodes, with negative values reflecting penalties or costs associated with suboptimal performance. This underscores the superiority of the proposed model in balancing coverage and constraint adherence.
+]
 =========================================
 
 
@@ -561,10 +542,12 @@ Metric Our CNN [ 35 ]
 =========================================
 [Visual Element: Table 4]
 [Caption Extracted: : Summary of overall performances of our approach and the baseline (Map 1,  B  = 4 N ).]
-[Vision Model Comprehensive Analysis: The table corresponds to **Table 4** mentioned in the context.  
+[Vision Model Comprehensive Analysis: **Answer:**  
+The image corresponds to **Table 4** mentioned in the context.  
 
-**Caption:**  
-Table 4 summarizes the overall performance metrics of the proposed approach versus a CNN baseline (denoted as "CNN]
+**Detailed Caption:**  
+Table 4 summarizes the overall performance metrics of two approaches: "Our" method and the baseline CNN [35] (referenced as [35]). The metrics evaluated are:  
+1. **# Full Cov. Episodes**: "Our" approach achieves 1,097 full coverage episodes, vastly outperforming CNN]
 =========================================
 
 
@@ -576,12 +559,10 @@ One of the main takeaways from the results is that our proposed use of a recurre
 =========================================
 [Visual Element: Figure 8]
 [Caption Extracted: : Rewards in three training maps.]
-[Vision Model Comprehensive Analysis: **Figure 8**  
-This figure illustrates the performance of two methods ("Our 100-episode mean" and "CNN 100-episode mean") across three distinct training maps (Map 1, Map 2, Map 3). The y-axis represents cumulative rewards (ranging from -3,500 to 0), and the x-axis tracks episodes (0 to 7,000).  
+[Vision Model Comprehensive Analysis: The image corresponds to **Figure 8**.  
 
-**Key observations**:  
-1. **Map 1**: "Our" method achieves significantly higher rewards than CNN, with rewards stabilizing near -1,000 by ~5,000 episodes. CNN lags behind, stabilizing closer to -2,000.  
-2. **]
+**Caption**: "Rewards in three training maps. The graphs compare the performance of two methods—'Our 100-episode mean' (blue line) and 'CNN 100-episode mean' (red line)—across three distinct training environments (Map 1, Map 2, Map 3). Rewards (y-axis) are plotted against episodes (x-axis). In all maps, the blue line initially underperforms but surpasses the red line as episodes increase, indicating improved convergence over time. Shaded regions represent variability in rewards, with the blue line showing broader uncertainty early on but stabilizing as training progresses. All three maps exhibit similar trends, with rewards plateauing near -1000 to -1500 after ~5,000 episodes."
+]
 =========================================
 
 
@@ -596,7 +577,24 @@ Metric Our CNN [ 35 ]
 
 # Max. Reward -63 -358
 
-Table 5 : Summary of overall performances of our approach and the baseline (Map 1,  B  = 6 N ).
+
+
+=========================================
+[Visual Element: Table 5]
+[Caption Extracted: : Summary of overall performances of our approach and the baseline (Map 1,  B  = 6 N ).]
+[Vision Model Comprehensive Analysis: The image corresponds to **Table 5**, as explicitly referenced in the surrounding text.  
+
+**Caption**:  
+Table 5 summarizes the overall performance metrics of the proposed approach versus a CNN-based baseline (CNN [35]) across three training maps. Key metrics include:  
+- **# Full Cov. Episodes**: The proposed approach achieves **1,154** episodes, significantly outperforming CNN's **25**.  
+- **# No Vio. Episodes**: The approach records **247** episodes, while CNN logs **1,568**.  
+- **# Best Episodes**: The proposed method attains **55** episodes, **5.70× higher** than CNN's **1** (as noted in the text).  
+- **# Max. Reward**: The approach yields **-63**, a marked improvement over CNN's **-358**.  
+
+This table highlights the superiority of the proposed technique in maximizing coverage and]
+=========================================
+
+
 
 the energy constraint. Furthermore, we observe that ﬁnding such a valid solution become even more challenging with lower budget, whereas with more budget, the robot can cover the environment without budget violation relatively easily.
 
@@ -616,11 +614,12 @@ g
 =========================================
 [Visual Element: Figure 9]
 [Caption Extracted: : Coverage, violation count, and reward in Map 1 with  B  = 4 N .]
-[Vision Model Comprehensive Analysis: The image corresponds to **Figure 9** mentioned in the context.  
+[Vision Model Comprehensive Analysis: **Figure 9**  
+The image displays three line graphs tracking performance metrics over 7,000 episodes for two methods ("Our 100-episode mean" and "CNN 100-episode mean") in Map 1 with parameters \( B = 4 \) and \( N \).  
 
-**Caption**:  
-This figure presents three performance metrics for a reinforcement learning agent in *Map 1* with *B = 4N* (batch size parameter). The left graph shows **coverage percentage** (percentage of explored states/actions), where both the proposed method ("Our 100-episode mean") and CNN baseline exhibit stable coverage (~90%), with minor fluctuations. The middle graph tracks **violation count** (number of constraint breaches), demonstrating a sharp decline from ~1,000 to ~200 violations over 7,000 episodes. The right graph illustrates **rewards**, where both methods show a gradual improvement from ~-3,000 to ~-1,500. While the proposed method slightly outperforms the CNN baseline in all metrics, the trends are qualitatively similar, indicating comparable learning dynamics. Error bands (shaded regions) reflect variability across 100 episodes.
-]
+1. **Coverage Percentage**: Both methods maintain high coverage (~90–100%), with "Our" method slightly outperforming CNN after ~1,000 episodes.  
+2. **Violations**: Violations drop sharply for both methods, but "Our" method reduces violations faster and stabilizes at a lower level (~200 vs. ~300 for CNN).  
+3. **Rewards**: Rewards improve for both, but "Our" method achieves a]
 =========================================
 
 
@@ -706,19 +705,18 @@ Episodes
 =========================================
 [Visual Element: Figure 10]
 [Caption Extracted: : Coverage, violation count, and reward in Map 1 with  B  = 6 N .]
-[Vision Model Comprehensive Analysis: **Figure 10**  
-This figure presents three line graphs comparing the performance of two methods ("Our 100-episode mean" and "CNN 100-episode mean") across three metrics in Map 1 with parameters \( B = 6 \) and \( N \) episodes:  
+[Vision Model Comprehensive Analysis: The image corresponds to **Figure 10** as labeled.  
+
+**Detailed Caption:**  
+The figure presents three comparative line graphs analyzing the performance of two methods ("Our 100-episode mean" and "CNN 100-episode mean") across three metrics—**Coverage Percentage**, **Violations**, and **Rewards**—in a simulated environment (Map 1) with parameters \( B = 6N \).  
 
 1. **Coverage Percentage**:  
-   - The blue line ("Our") starts slightly below the red line ("CNN") but surpasses it after ~1,000 episodes, maintaining higher coverage (peaking near 100%) for the remainder of the episodes.  
-   - The red line stabilizes around 90–95% coverage.  
+   - "Our" method (blue) starts with lower coverage but rapidly surpasses the CNN baseline (red) after ~500 episodes, stabilizing at ~95% coverage.  
+   - CNN (red) begins higher (~85%) but declines to ~80% by 7,000 episodes, showing instability.  
 
 2. **Violations**:  
-   - Both lines begin with high violation counts (~800–1,200), but the blue line declines sharply and remains significantly lower than the red line throughout, indicating fewer violations.  
-
-3. **Rewards**:  
-   - The blue line starts lower than the red line but experiences a steep upward trajectory after ~2,000 episodes, surpassing the red line and stabilizing near +2,000 rewards.  
-   - The red line remains relatively flat]
+   - "Our" method initially has higher violations (~100) but decreases sharply, stabilizing below CNN (~50) after ~2,000 episodes.  
+   - CNN (red) starts lower but increases to ~80 violations by 7,000 episodes, indicating worsening]
 =========================================
 
 

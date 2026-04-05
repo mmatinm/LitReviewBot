@@ -96,7 +96,7 @@ def sort_text_blocks(blocks, page_width):
             
     return sorted_blocks
 
-def get_closest_visual(caption_bbox, visual_rects):
+def get_closest_visual(caption_bbox, visual_rects, label_type):
     """Pairs a caption to its structurally corresponding visual bounding box (above or below)."""
     best_rect = None
     min_dist = float('inf')
@@ -104,9 +104,14 @@ def get_closest_visual(caption_bbox, visual_rects):
     
     for r in visual_rects:
         rcx = (r.x0 + r.x1) / 2
-        # Ensure it's roughly in the same vertical column band
-        if abs(rcx - cx) < 250:
-            dist = min(abs(caption_bbox[1] - r.y1), abs(r.y0 - caption_bbox[3]))
+        # Ensure it's roughly in the same vertical column band, OR the visual is full width
+        if abs(rcx - cx) < 250 or r.width > 350:
+            # Both Figures and Tables are typically ABOVE their captions in this format.
+            # Skip visuals that are entirely below the caption.
+            if r.y0 > caption_bbox[3] + 10:
+                continue
+            dist = abs(caption_bbox[1] - r.y1)
+                
             if dist < min_dist:
                 min_dist = dist
                 best_rect = r
@@ -216,7 +221,29 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                     canonical_label = f"Figure {label_num}" if "fig" in label_type else f"Table {label_num}"
                     
                     caption_rect = fitz.Rect(b["bbox"])
-                    matched_visual = get_closest_visual(caption_rect, merged_visuals)
+                    matched_visual = get_closest_visual(caption_rect, merged_visuals, label_type)
+                    
+                    # 1. Fallback for tables missed by native extraction
+                    if not matched_visual and "tab" in label_type:
+                        table_blocks_rect = fitz.Rect()
+                        cx = (caption_rect.x0 + caption_rect.x1) / 2
+                        
+                        for tb in text_blocks:
+                            if tb == b: continue
+                            tb_rect = fitz.Rect(tb["bbox"])
+                            tb_cx = (tb_rect.x0 + tb_rect.x1) / 2
+                            # If text is ABOVE the caption and in same column natively
+                            if tb_rect.y1 <= caption_rect.y0 + 10 and abs(tb_cx - cx) < 200:
+                                # Stop at 150px to prevent capturing massive chunks of text (vertical ballooning)
+                                if caption_rect.y0 - tb_rect.y1 > 150:
+                                    continue
+                                table_blocks_rect = table_blocks_rect | tb_rect
+                                
+                        if not table_blocks_rect.is_empty:
+                            matched_visual = table_blocks_rect
+                        else:
+                            # Absolute geometry fallback (modest box directly above the caption instead of huge)
+                            matched_visual = fitz.Rect(max(30, caption_rect.x0 - 20), max(30, caption_rect.y0 - 100), min(page.rect.width - 30, caption_rect.x1 + 20), caption_rect.y0)
                     
                     if matched_visual:
                         try:
@@ -226,15 +253,27 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                             # CRITICAL FIX for the "CNN/LSTM text cutoff":
                             # We stretch the bounding box perfectly flush to the caption header 
                             # capturing all un-boxed sub-labels naturally sitting between.
-                            # We ALSO expand the width carefully just to match the caption's width,
-                            # preventing those awful cross-column expansions we experienced.
-                            if "fig" in label_type:
-                                final_rect.y1 = max(final_rect.y1, caption_rect.y0 - 2)
-                            else:
-                                final_rect.y0 = min(final_rect.y0, caption_rect.y1 + 2)
+                            # Both tables and figures are above their captions.
+                            final_rect.y1 = max(final_rect.y1, caption_rect.y0 - 2)
 
-                            final_rect.x0 = min(final_rect.x0, caption_rect.x0)
-                            final_rect.x1 = max(final_rect.x1, caption_rect.x1)
+                            # Problem 1: Crop full width pictures wider BUT keep tables constrained
+                            # If a FIGURE spans a large segment horizontally, stretch it to the page margins
+                            if "fig" in label_type and final_rect.width > page.rect.width * 0.5:
+                                final_rect.x0 = 35 
+                                final_rect.x1 = page.rect.width - 35
+                            elif "tab" in label_type:
+                                # Provide gentle padding for tables. Avoid blowing out horizontally to caption bounds
+                                # if the visual is naturally narrower than the caption.
+                                final_rect.x0 = final_rect.x0 - 10
+                                final_rect.x1 = final_rect.x1 + 10
+                                # Re-adjust just to make sure we at least cover the caption safely
+                                if caption_rect.x0 < final_rect.x0:
+                                    final_rect.x0 = caption_rect.x0 - 5
+                                if caption_rect.x1 > final_rect.x1:
+                                    final_rect.x1 = caption_rect.x1 + 5
+                            else:
+                                final_rect.x0 = min(final_rect.x0, caption_rect.x0 - 10)
+                                final_rect.x1 = max(final_rect.x1, caption_rect.x1 + 10)
 
                             final_rect = final_rect.intersect(page.rect)
                             
@@ -263,7 +302,8 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                                 f"=========================================\n\n"
                             )
                             b["is_caption"] = True
-                            merged_visuals.remove(matched_visual)
+                            if matched_visual in merged_visuals:
+                                merged_visuals.remove(matched_visual)
                         except Exception as e:
                             print(f"[Warn] Render failed for {canonical_label}: {e}")
 
