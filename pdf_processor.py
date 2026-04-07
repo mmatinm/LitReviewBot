@@ -7,15 +7,15 @@ from openai import OpenAI
 from api_client import generate_image_caption
 
 def normalize_label(label: str) -> list:
-    """Takes a label like 'Figure 1' and returns regex variations."""
-    num_match = re.search(r'\d+[\w\.]*', label)
+    """Takes a label like 'Figure 1' or 'Table II' and returns regex variations."""
+    num_match = re.search(r'\d+[\w\.]*|[IVXLCDMivxlcdm]+', label)
     if not num_match:
         return [label.lower()]
     num = num_match.group()
     if "fig" in label.lower():
         return [rf"\bfigure\s+{num}\b", rf"\bfig\.\s*{num}\b", rf"\bfig\s+{num}\b"]
     elif "tab" in label.lower():
-        return [rf"\btable\s+{num}\b", rf"\btbl\.\s*{num}\b", rf"\btbl\s+{num}\b"]
+        return [rf"\btable\s+{num}\b", rf"\btbl\.\s*{num}\b", rf"\btbl\s+{num}\b", rf"\btab\.\s*{num}\b", rf"\btab\s+{num}\b"]
     return [label.lower()]
 
 def search_relevant_paragraphs(all_blocks: list, label: str) -> str:
@@ -33,15 +33,15 @@ def search_relevant_paragraphs(all_blocks: list, label: str) -> str:
         return f"No deep paragraphs explicitly mentioning '{label}' found."
     return "\n...\n".join(relevant)
 
-def merge_visual_rects(page_rects, margin=15):
+def merge_visual_rects(page_rects, margin=15, vertical_margin=10):
     """Merges overlapping or nearby geometric bounding boxes to form single coherent visual areas."""
     merged = []
     for r in page_rects:
         if r.is_empty: continue
-        r_exp = r + (-margin, -margin, margin, margin)
+        r_exp = r + (-margin, -vertical_margin, margin, vertical_margin)
         intersected = []
         for i, m in enumerate(merged):
-            m_exp = m + (-margin, -margin, margin, margin)
+            m_exp = m + (-margin, -vertical_margin, margin, vertical_margin)
             if r_exp.intersects(m_exp):
                 intersected.append(i)
         
@@ -100,26 +100,42 @@ def get_closest_visual(caption_bbox, visual_rects, label_type):
     """Pairs a caption to its structurally corresponding visual bounding box (above or below)."""
     best_rect = None
     min_dist = float('inf')
+    best_is_above = True
     cx = (caption_bbox[0] + caption_bbox[2]) / 2
     
     for r in visual_rects:
         rcx = (r.x0 + r.x1) / 2
         # Ensure it's roughly in the same vertical column band, OR the visual is full width
         if abs(rcx - cx) < 250 or r.width > 350:
-            # Both Figures and Tables are typically ABOVE their captions in this format.
-            # Skip visuals that are entirely below the caption.
-            if r.y0 > caption_bbox[3] + 10:
-                continue
-            dist = abs(caption_bbox[1] - r.y1)
+            if "fig" in label_type:
+                if r.y0 > caption_bbox[3] + 10:
+                    continue
+                dist = abs(caption_bbox[1] - r.y1)
+                is_above = True
+            else:
+                dist_above = abs(caption_bbox[1] - r.y1) if r.y1 <= caption_bbox[1] + 10 else float('inf')
+                dist_below = abs(r.y0 - caption_bbox[3]) if r.y0 >= caption_bbox[3] - 10 else float('inf')
+                
+                # If it physically overlaps the caption bounding box, count as 0
+                if r.y0 <= caption_bbox[3] and r.y1 >= caption_bbox[1]:
+                    dist_above = 0
+                
+                if dist_above <= dist_below:
+                    dist = dist_above
+                    is_above = True
+                else:
+                    dist = dist_below
+                    is_above = False
                 
             if dist < min_dist:
                 min_dist = dist
                 best_rect = r
+                best_is_above = is_above
                 
     if min_dist > 300:
-        return None
+        return None, True
         
-    return best_rect
+    return best_rect, best_is_above
 
 def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_callback=None):
     """
@@ -135,7 +151,7 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
     save_text_dir = "extracted_texts"
     os.makedirs(save_text_dir, exist_ok=True)
     
-    label_pattern = re.compile(r'(?i)^(figure|fig\.?|table|tab\.?)\s+(\d+[\w\.]*)(?::|\.|-)?\s*(.*)')
+    label_pattern = re.compile(r'(?i)^(figure|fig\.?|table|tab\.?)\s+(\d+[\w\.]*|[IVXLCDMivxlcdm]+)(?::|\.|-)?\s*(.*)')
 
     for file_idx, uploaded_file in enumerate(upload_files):
         filename = uploaded_file.name
@@ -172,7 +188,7 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                 for t in tabs.tables:
                     raw_rects.append(fitz.Rect(t.bbox))
                 
-            merged_visuals = merge_visual_rects(raw_rects, margin=20)
+            merged_visuals = merge_visual_rects(raw_rects, margin=15, vertical_margin=10)
             
             # --- 2. Extract Text & Clean Pollutant Labels ---
             blocks = page.get_text("dict")["blocks"]
@@ -221,7 +237,12 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                     canonical_label = f"Figure {label_num}" if "fig" in label_type else f"Table {label_num}"
                     
                     caption_rect = fitz.Rect(b["bbox"])
-                    matched_visual = get_closest_visual(caption_rect, merged_visuals, label_type)
+                    matched_visual_tuple = get_closest_visual(caption_rect, merged_visuals, label_type)
+                    if isinstance(matched_visual_tuple, tuple):
+                        matched_visual, is_above = matched_visual_tuple
+                    else:
+                        matched_visual = matched_visual_tuple
+                        is_above = True
                     
                     # 1. Fallback for tables missed by native extraction
                     if not matched_visual and "tab" in label_type:
@@ -244,6 +265,7 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                         else:
                             # Absolute geometry fallback (modest box directly above the caption instead of huge)
                             matched_visual = fitz.Rect(max(30, caption_rect.x0 - 20), max(30, caption_rect.y0 - 100), min(page.rect.width - 30, caption_rect.x1 + 20), caption_rect.y0)
+                        is_above = True
                     
                     if matched_visual:
                         try:
@@ -253,12 +275,14 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                             # CRITICAL FIX for the "CNN/LSTM text cutoff":
                             # We stretch the bounding box perfectly flush to the caption header 
                             # capturing all un-boxed sub-labels naturally sitting between.
-                            # Both tables and figures are above their captions.
-                            final_rect.y1 = max(final_rect.y1, caption_rect.y0 - 2)
+                            if is_above:
+                                final_rect.y1 = max(final_rect.y1, caption_rect.y0 - 2)
+                            else:
+                                final_rect.y0 = min(final_rect.y0, caption_rect.y1 + 2)
 
                             # Problem 1: Crop full width pictures wider BUT keep tables constrained
                             # If a FIGURE spans a large segment horizontally, stretch it to the page margins
-                            if "fig" in label_type and final_rect.width > page.rect.width * 0.5:
+                            if "fig" in label_type and final_rect.width > page.rect.width * 0.65:
                                 final_rect.x0 = 35 
                                 final_rect.x1 = page.rect.width - 35
                             elif "tab" in label_type:

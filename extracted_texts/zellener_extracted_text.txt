@@ -41,9 +41,7 @@ is vacuum cleaning a house and there are multi- ple charging stations located in
 =========================================
 [Visual Element: Figure 1]
 [Caption Extracted: : An illustration of a typical rectangular environment. The green color indicates the charg- ing stations and gray indicates obstacles. The robot always starts from a charging station as shown here. Four maximum possible actions from any cell are shown with red dashed lines with arrows.]
-[Vision Model Comprehensive Analysis: **Figure 1**  
-An illustration of a typical rectangular environment. The grid consists of cells colored green (charging stations) and gray (static polygonal obstacles). The robot begins at a charging station (green cell) and can move in four possible directions (up, down, left, right) as indicated by red dashed arrows. The environment is discretized into a 4-connected grid, with obstacles and charging stations represented as fixed features. This setup models a scenario where the robot navigates while avoiding obstacles and utilizing charging stations.
-]
+[Vision Model Comprehensive Analysis: [Image transcription failed: Error code: 401 - {'error': {'message': 'Missing Authentication header', 'code': 401}}]]
 =========================================
 
 
@@ -111,14 +109,7 @@ State Space. A state  x  ∈S  of the robot is represented by a 4  ×  N  ×  N 
 =========================================
 [Visual Element: Figure 2]
 [Caption Extracted: : Inputs to our proposed neural network model are shown (following the illustrated envi- ronment in Fig.  1 ) – the obstacle and charging station matrices do not change over time. How- ever, the current location matrix is updated after every action is taken by the robot and a new cell is reached. The empty cells in the matrices are ﬁlled with 0’s (not shown here for brevity).]
-[Vision Model Comprehensive Analysis: **Figure 2**  
-This image illustrates the input structure for a neural network model in a robot navigation task. It depicts a 3D grid environment with multiple stacked layers (time steps) showing:  
-1. **Obstacles** (gray cells) and **charging stations** (green cells), which remain static across all layers.  
-2. **Current location** (red diamond) updated dynamically after each robot action.  
-3. **Past locations** (orange diamonds) tracing the robot’s trajectory.  
-4. Empty cells (not explicitly shown) are filled with zeros.  
-The visualization emphasizes how spatial and temporal data are encoded for the model, with static environmental features contrasted against the robot’s evolving position.
-]
+[Vision Model Comprehensive Analysis: [Image transcription failed: Error code: 401 - {'error': {'message': 'Missing Authentication header', 'code': 401}}]]
 =========================================
 
 
@@ -181,11 +172,17 @@ The proposed Q-network architecture is shown in Fig.  3 . The input to the netwo
 --- Page 6 ---
 Springer Nature 2021 L A T E X template
 
++
+
+State Input LSTM
+
 Budget
 
 Conv 1
 
 Conv 2
+
+128
 
 |A|
 
@@ -198,10 +195,7 @@ Output
 =========================================
 [Visual Element: Figure 3]
 [Caption Extracted: : Deep recurrent Q-learning architecture for energy-constrained CPP.]
-[Vision Model Comprehensive Analysis: The image corresponds to **Figure 3** mentioned in the text.  
-
-**Caption:**  
-*Deep recurrent Q-learning architecture for energy-constrained CPP (Figure 3).* The architecture processes a four-channel state input through two convolutional layers (Conv 1 and Conv 2), each with 16 output channels, 5×5 filters, and stride 1, followed by batch normalization and ReLU activation. The output of the second convolutional layer is concatenated with the robot’s remaining energy budget. This combined feature map is fed]
+[Vision Model Comprehensive Analysis: [Image transcription failed: Error code: 401 - {'error': {'message': 'Missing Authentication header', 'code': 401}}]]
 =========================================
 
 
@@ -272,11 +266,7 @@ Optimizer Adam
 =========================================
 [Visual Element: Table 1]
 [Caption Extracted: : List of parameters used in our experi- ments.]
-[Vision Model Comprehensive Analysis: **Table 1: List of parameters used in our experiments**  
-This table details the hyperparameters and architectural choices for a deep reinforcement learning (DRL) model implemented in Python using PyTorch. Key parameters include:  
-- **State**: A 4×16×16 matrix (likely encoding robot position, battery level, and environmental features in a 16×16 grid).  
-- **Action**: Four discrete actions (Up, Down, Left, Right).  
-- **Training episodes**: 10,0]
+[Vision Model Comprehensive Analysis: [Image transcription failed: Error code: 401 - {'error': {'message': 'Missing Authentication header', 'code': 401}}]]
 =========================================
 
 
@@ -301,15 +291,7 @@ Map 1 Map 2 Map 3
 =========================================
 [Visual Element: Figure 5]
 [Caption Extracted: : Three diﬀerent maps used in our experiments. Red cells indicate the charging stations and the black cells indicate the obstacles.]
-[Vision Model Comprehensive Analysis: **Figure 5**  
-Three distinct 16×16 grid maps used in experiments to evaluate pathfinding algorithms. Red cells represent charging stations, while black cells denote obstacles.  
-- **Map 1**: Sparse distribution of red cells (charging stations) with minimal obstacles, emphasizing open space.  
-- **Map 2**: Dense clustering of red cells in the central and top-right regions, with moderate obstacles, simulating a high-demand area.  
-- **Map 3**: Highest density of red cells, particularly in the central and bottom-right regions, with obstacles strategically placed to test complex navigation.  
-The maps vary in charging station density and obstacle placement to assess algorithm performance under different environmental constraints.  
-
-*Key context*: The maps are part of experiments using Python and PyTorch for reinforcement learning, executed on NVIDIA GPU with CUDA acceleration. Environment size (N=16) and parameters are detailed in Table 1.
-]
+[Vision Model Comprehensive Analysis: [Image transcription failed: Error code: 401 - {'error': {'message': 'Missing Authentication header', 'code': 401}}]]
 =========================================
 
 
@@ -389,11 +371,7 @@ Coverage: Map 1 Coverage: Map 2 Coverage: Map 3
 =========================================
 [Visual Element: Figure 6]
 [Caption Extracted: : Percentages of coverage in three training maps.]
-[Vision Model Comprehensive Analysis: **Figure 6: Percentages of coverage in three training maps.**  
-The image displays three subplots (Map 1, Map 2, and Map 3) comparing coverage performance between a proposed technique (blue line) and a CNN-based method (red line) across 7,000 training episodes. Coverage percentage (y-axis) is plotted against episodes (x-axis). Key observations:  
-1. **Proposed technique** (blue) consistently achieves higher coverage than CNN (red) in all maps, with coverage stabilizing near 90–100% after initial fluctuations.  
-2. **Variability**: The shaded bands (representing standard deviation) are narrower for the proposed method, indicating more consistent performance.  
-3. **Key data**: For 7,000 episodes, the proposed method achieved full coverage 744, 1,081, and ]
+[Vision Model Comprehensive Analysis: [Image transcription failed: Error code: 401 - {'error': {'message': 'Missing Authentication header', 'code': 401}}]]
 =========================================
 
 
@@ -453,7 +431,7 @@ Violations: Map 1 Violations: Map 2 Violations: Map 3
 =========================================
 [Visual Element: Figure 7]
 [Caption Extracted: : The number of violations in three training maps.]
-[Vision Model Comprehensive Analysis: None]
+[Vision Model Comprehensive Analysis: [Image transcription failed: Error code: 401 - {'error': {'message': 'Missing Authentication header', 'code': 401}}]]
 =========================================
 
 
@@ -492,7 +470,7 @@ CNN [ 35 ] 34 191
 =========================================
 [Visual Element: Table 2]
 [Caption Extracted: : Summary of performances of two indi- vidual optimization metrics.]
-[Vision Model Comprehensive Analysis: None]
+[Vision Model Comprehensive Analysis: [Image transcription failed: Error code: 401 - {'error': {'message': 'Missing Authentication header', 'code': 401}}]]
 =========================================
 
 
@@ -516,11 +494,7 @@ CNN [ 35 ] 0 NA
 =========================================
 [Visual Element: Table 3]
 [Caption Extracted: : Summary of overall performances of our approach and the baseline.]
-[Vision Model Comprehensive Analysis: The image corresponds to **Table 3** mentioned in the context.  
-
-**Caption:**  
-Table 3 summarizes the performance comparison between the proposed CNN-based model ("Our CNN") and a baseline CNN model across three tested maps. For each map, the table reports the number of "best episodes" (episodes achieving 100% environmental coverage with zero energy constraint violations) and the maximum reward earned in those episodes. Results indicate that "Our CNN" consistently identified valid solutions (e.g., 9, 7, and 16 best episodes for Maps 1, 2, and 3, respectively), while the baseline CNN failed to find any valid solutions (0 best episodes across all maps). The "Max. Reward" column highlights the highest reward achieved in the best episodes, with negative values reflecting penalties or costs associated with suboptimal performance. This underscores the superiority of the proposed model in balancing coverage and constraint adherence.
-]
+[Vision Model Comprehensive Analysis: [Image transcription failed: Error code: 401 - {'error': {'message': 'Missing Authentication header', 'code': 401}}]]
 =========================================
 
 
@@ -542,12 +516,7 @@ Metric Our CNN [ 35 ]
 =========================================
 [Visual Element: Table 4]
 [Caption Extracted: : Summary of overall performances of our approach and the baseline (Map 1,  B  = 4 N ).]
-[Vision Model Comprehensive Analysis: **Answer:**  
-The image corresponds to **Table 4** mentioned in the context.  
-
-**Detailed Caption:**  
-Table 4 summarizes the overall performance metrics of two approaches: "Our" method and the baseline CNN [35] (referenced as [35]). The metrics evaluated are:  
-1. **# Full Cov. Episodes**: "Our" approach achieves 1,097 full coverage episodes, vastly outperforming CNN]
+[Vision Model Comprehensive Analysis: [Image transcription failed: Error code: 401 - {'error': {'message': 'Missing Authentication header', 'code': 401}}]]
 =========================================
 
 
@@ -559,10 +528,7 @@ One of the main takeaways from the results is that our proposed use of a recurre
 =========================================
 [Visual Element: Figure 8]
 [Caption Extracted: : Rewards in three training maps.]
-[Vision Model Comprehensive Analysis: The image corresponds to **Figure 8**.  
-
-**Caption**: "Rewards in three training maps. The graphs compare the performance of two methods—'Our 100-episode mean' (blue line) and 'CNN 100-episode mean' (red line)—across three distinct training environments (Map 1, Map 2, Map 3). Rewards (y-axis) are plotted against episodes (x-axis). In all maps, the blue line initially underperforms but surpasses the red line as episodes increase, indicating improved convergence over time. Shaded regions represent variability in rewards, with the blue line showing broader uncertainty early on but stabilizing as training progresses. All three maps exhibit similar trends, with rewards plateauing near -1000 to -1500 after ~5,000 episodes."
-]
+[Vision Model Comprehensive Analysis: [Image transcription failed: Error code: 401 - {'error': {'message': 'Missing Authentication header', 'code': 401}}]]
 =========================================
 
 
@@ -582,16 +548,7 @@ Metric Our CNN [ 35 ]
 =========================================
 [Visual Element: Table 5]
 [Caption Extracted: : Summary of overall performances of our approach and the baseline (Map 1,  B  = 6 N ).]
-[Vision Model Comprehensive Analysis: The image corresponds to **Table 5**, as explicitly referenced in the surrounding text.  
-
-**Caption**:  
-Table 5 summarizes the overall performance metrics of the proposed approach versus a CNN-based baseline (CNN [35]) across three training maps. Key metrics include:  
-- **# Full Cov. Episodes**: The proposed approach achieves **1,154** episodes, significantly outperforming CNN's **25**.  
-- **# No Vio. Episodes**: The approach records **247** episodes, while CNN logs **1,568**.  
-- **# Best Episodes**: The proposed method attains **55** episodes, **5.70× higher** than CNN's **1** (as noted in the text).  
-- **# Max. Reward**: The approach yields **-63**, a marked improvement over CNN's **-358**.  
-
-This table highlights the superiority of the proposed technique in maximizing coverage and]
+[Vision Model Comprehensive Analysis: [Image transcription failed: Error code: 401 - {'error': {'message': 'Missing Authentication header', 'code': 401}}]]
 =========================================
 
 
@@ -614,12 +571,7 @@ g
 =========================================
 [Visual Element: Figure 9]
 [Caption Extracted: : Coverage, violation count, and reward in Map 1 with  B  = 4 N .]
-[Vision Model Comprehensive Analysis: **Figure 9**  
-The image displays three line graphs tracking performance metrics over 7,000 episodes for two methods ("Our 100-episode mean" and "CNN 100-episode mean") in Map 1 with parameters \( B = 4 \) and \( N \).  
-
-1. **Coverage Percentage**: Both methods maintain high coverage (~90–100%), with "Our" method slightly outperforming CNN after ~1,000 episodes.  
-2. **Violations**: Violations drop sharply for both methods, but "Our" method reduces violations faster and stabilizes at a lower level (~200 vs. ~300 for CNN).  
-3. **Rewards**: Rewards improve for both, but "Our" method achieves a]
+[Vision Model Comprehensive Analysis: [Image transcription failed: Error code: 401 - {'error': {'message': 'Missing Authentication header', 'code': 401}}]]
 =========================================
 
 
@@ -705,18 +657,7 @@ Episodes
 =========================================
 [Visual Element: Figure 10]
 [Caption Extracted: : Coverage, violation count, and reward in Map 1 with  B  = 6 N .]
-[Vision Model Comprehensive Analysis: The image corresponds to **Figure 10** as labeled.  
-
-**Detailed Caption:**  
-The figure presents three comparative line graphs analyzing the performance of two methods ("Our 100-episode mean" and "CNN 100-episode mean") across three metrics—**Coverage Percentage**, **Violations**, and **Rewards**—in a simulated environment (Map 1) with parameters \( B = 6N \).  
-
-1. **Coverage Percentage**:  
-   - "Our" method (blue) starts with lower coverage but rapidly surpasses the CNN baseline (red) after ~500 episodes, stabilizing at ~95% coverage.  
-   - CNN (red) begins higher (~85%) but declines to ~80% by 7,000 episodes, showing instability.  
-
-2. **Violations**:  
-   - "Our" method initially has higher violations (~100) but decreases sharply, stabilizing below CNN (~50) after ~2,000 episodes.  
-   - CNN (red) starts lower but increases to ~80 violations by 7,000 episodes, indicating worsening]
+[Vision Model Comprehensive Analysis: [Image transcription failed: Error code: 401 - {'error': {'message': 'Missing Authentication header', 'code': 401}}]]
 =========================================
 
 
