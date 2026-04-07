@@ -97,45 +97,29 @@ def sort_text_blocks(blocks, page_width):
     return sorted_blocks
 
 def get_closest_visual(caption_bbox, visual_rects, label_type):
-    """Pairs a caption to its structurally corresponding visual bounding box (above or below)."""
+    """Pairs a caption to its structurally corresponding visual bounding box."""
     best_rect = None
     min_dist = float('inf')
-    best_is_above = True
     cx = (caption_bbox[0] + caption_bbox[2]) / 2
     
     for r in visual_rects:
         rcx = (r.x0 + r.x1) / 2
         # Ensure it's roughly in the same vertical column band, OR the visual is full width
         if abs(rcx - cx) < 250 or r.width > 350:
-            if "fig" in label_type:
-                if r.y0 > caption_bbox[3] + 10:
-                    continue
-                dist = abs(caption_bbox[1] - r.y1)
-                is_above = True
-            else:
-                dist_above = abs(caption_bbox[1] - r.y1) if r.y1 <= caption_bbox[1] + 10 else float('inf')
-                dist_below = abs(r.y0 - caption_bbox[3]) if r.y0 >= caption_bbox[3] - 10 else float('inf')
-                
-                # If it physically overlaps the caption bounding box, count as 0
-                if r.y0 <= caption_bbox[3] and r.y1 >= caption_bbox[1]:
-                    dist_above = 0
-                
-                if dist_above <= dist_below:
-                    dist = dist_above
-                    is_above = True
-                else:
-                    dist = dist_below
-                    is_above = False
+            # Both Figures and Tables are typically ABOVE their captions in this format.
+            # Skip visuals that are entirely below the caption.
+            if r.y0 > caption_bbox[3] + 10:
+                continue
+            dist = abs(caption_bbox[1] - r.y1)
                 
             if dist < min_dist:
                 min_dist = dist
                 best_rect = r
-                best_is_above = is_above
                 
-    if min_dist > 300:
-        return None, True
+    if min_dist > 150:
+        return None
         
-    return best_rect, best_is_above
+    return best_rect
 
 def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_callback=None):
     """
@@ -179,7 +163,7 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
             for d in page.get_drawings():
                 r = d["rect"]
                 # Prevent massive invisible page-borders from mapping as an image
-                if 10 < r.width < page.rect.width * 0.90 and 10 < r.height < page.rect.height * 0.90:
+                if 10 < r.width < page.rect.width * 0.90 and 10 < r.height < page.rect.height * 0.40:
                     raw_rects.append(fitz.Rect(r))
                     
             # 1c. Native Fast Tables
@@ -237,12 +221,7 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                     canonical_label = f"Figure {label_num}" if "fig" in label_type else f"Table {label_num}"
                     
                     caption_rect = fitz.Rect(b["bbox"])
-                    matched_visual_tuple = get_closest_visual(caption_rect, merged_visuals, label_type)
-                    if isinstance(matched_visual_tuple, tuple):
-                        matched_visual, is_above = matched_visual_tuple
-                    else:
-                        matched_visual = matched_visual_tuple
-                        is_above = True
+                    matched_visual = get_closest_visual(caption_rect, merged_visuals, label_type)
                     
                     # 1. Fallback for tables missed by native extraction
                     if not matched_visual and "tab" in label_type:
@@ -265,7 +244,6 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                         else:
                             # Absolute geometry fallback (modest box directly above the caption instead of huge)
                             matched_visual = fitz.Rect(max(30, caption_rect.x0 - 20), max(30, caption_rect.y0 - 100), min(page.rect.width - 30, caption_rect.x1 + 20), caption_rect.y0)
-                        is_above = True
                     
                     if matched_visual:
                         try:
@@ -275,10 +253,8 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                             # CRITICAL FIX for the "CNN/LSTM text cutoff":
                             # We stretch the bounding box perfectly flush to the caption header 
                             # capturing all un-boxed sub-labels naturally sitting between.
-                            if is_above:
-                                final_rect.y1 = max(final_rect.y1, caption_rect.y0 - 2)
-                            else:
-                                final_rect.y0 = min(final_rect.y0, caption_rect.y1 + 2)
+                            # Both tables and figures are above their captions.
+                            final_rect.y1 = max(final_rect.y1, caption_rect.y0 - 2)
 
                             # Problem 1: Crop full width pictures wider BUT keep tables constrained
                             # If a FIGURE spans a large segment horizontally, stretch it to the page margins
