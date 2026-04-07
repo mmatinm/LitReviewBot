@@ -49,7 +49,8 @@ def main():
         
         st.subheader("Document Upload")
         uploaded_files = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
-        
+
+        process_visuals_ui = st.checkbox("Process tables and figures with AI (High Usage)", value=False, help="When checked, the AI models will process every table and graphic found in the papers. WARNING: This consumes a considerable amount of your OpenRouter usage limit and increases processing time. Uncheck to extract text only.")
         process_btn = st.button("process Papers")
 
     # State variables
@@ -83,22 +84,9 @@ def main():
                     uploaded_files, 
                     client, 
                     vision_model, 
-                    progress_callback=update_progress
+                    progress_callback=update_progress,
+                    process_visuals=process_visuals_ui
                 )
-                
-            with st.spinner("Step 2: Chunking and Embedding into Vector Store..."):
-                # 2. Chunk & Vectorize
-                st.session_state.vector_store = initialize_vector_store(
-                    st.session_state.documents_data,
-                    progress_callback=update_progress
-                )
-                
-            status_text.empty()
-            st.sidebar.success("✅ PDFs Processed and Indexed successfully!")
-
-    # ------------------
-    # Main Tabs
-    # ------------------
     tab1, tab2, tab3 = st.tabs(["Chat", "Summaries", "Literature Review Builder"])
     
     # ------------------

@@ -121,7 +121,7 @@ def get_closest_visual(caption_bbox, visual_rects, label_type):
         
     return best_rect
 
-def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_callback=None):
+def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_callback=None, process_visuals=False):
     """
     Advanced PDF Processor strictly rolled back to the stable topological sort.
     We dropped pdfplumber entirely for extreme speed, utilizing PyMuPDF table geometry.
@@ -175,9 +175,9 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
             merged_visuals = merge_visual_rects(raw_rects, margin=15, vertical_margin=10)
             
             # --- 2. Extract Text & Clean Pollutant Labels ---
-            blocks = page.get_text("dict")["blocks"]
-            text_blocks = [b for b in blocks if b['type'] == 0]
-            
+            blocks = page.get_text("blocks", flags=fitz.TEXT_DEHYPHENATE)
+            text_blocks = [{"bbox": b[:4], "text": b[4]} for b in blocks if b[-1] == 0]
+
             clean_text_blocks = []
             for b in text_blocks:
                 b_rect = fitz.Rect(b["bbox"])
@@ -188,12 +188,11 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                         if intersect.get_area() > b_rect.get_area() * 0.5:
                             polluted = True
                             break
-                
+
                 if not polluted:
-                    lines = []
-                    for l in b["lines"]:
-                        lines.append(" ".join([s["text"] for s in l["spans"]]))
-                    text = " ".join(lines).strip()
+                    # Clear out unnecessary enters and unknown unicode replacements
+                    text = re.sub(r'\s+', ' ', b["text"].replace('\n', ' ').replace('\ufffd', '')).strip()
+                    text = text.replace('(cid:10)', ' ').replace('(cid:13)', ' ')
                     if text:
                         clean_text_blocks.append({
                             "bbox": b["bbox"], 
@@ -276,28 +275,33 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                                 final_rect.x1 = max(final_rect.x1, caption_rect.x1 + 10)
 
                             final_rect = final_rect.intersect(page.rect)
-                            
-                            pix = page.get_pixmap(clip=final_rect, dpi=200) 
-                            image_bytes = pix.tobytes("jpeg")
-                            
                             context_paragraphs = search_relevant_paragraphs(all_blocks_flat, canonical_label)
-                            
-                            vision_prompt_context = f"Visual Name: {canonical_label}. Original Caption: {caption_body}\n\nKey occurrences found in text:\n{context_paragraphs}"
-                            vision_description = generate_image_caption(client, vision_model, image_bytes, vision_prompt_context)
                             
                             safe_filename = filename.replace(".pdf", "")
                             base_name = f"{safe_filename}_Page{page_num+1}_{canonical_label.replace(' ', '_')}"
-                            
-                            with open(os.path.join(save_dir, f"{base_name}.jpg"), "wb") as f:
-                                f.write(image_bytes)
-                            with open(os.path.join(save_dir, f"{base_name}.txt"), "w", encoding="utf-8") as f:
-                                f.write(f"--- Detected Label ---\n{canonical_label}: {caption_body}\n\n")
-                                f.write(f"--- Extracted Model Description ---\n{vision_description}\n")
+
+                            if process_visuals:
+                                pix = page.get_pixmap(clip=final_rect, dpi=200) 
+                                image_bytes = pix.tobytes("jpeg")
+
+                                with open(os.path.join(save_dir, f"{base_name}.jpg"), "wb") as f:
+                                    f.write(image_bytes)
+
+                                vision_prompt_instruction = f"The provided image may be imperfectly cropped and contain multiple figures, tables, or irrelevant text. Your STRICT objective is to locate and analyze ONLY the visual named '{canonical_label}' which matches this Original Caption: '{caption_body}'. Completely IGNORE any other graphs, tables, or text surrounding it. Provide a comprehensive summary of ONLY the target visual.\n\nContextual paragraphs from the paper for reference:\n{context_paragraphs}"
+                                vision_description = generate_image_caption(client, vision_model, image_bytes, vision_prompt_instruction)
+
+                                with open(os.path.join(save_dir, f"{base_name}.txt"), "w", encoding="utf-8") as f:
+                                    f.write(f"--- Detected Label ---\n{canonical_label}: {caption_body}\n\n")
+                                    f.write(f"--- Relevant Text Paragraphs ---\n{context_paragraphs}\n\n")
+                                    f.write(f"--- Extracted Model Description ---\n{vision_description}\n")
+                            else:
+                                vision_description = "Visual AI processing disabled by user to conserve OpenRouter API limit. Visual files were not saved."
                             
                             b["text"] = (
                                 f"\n\n=========================================\n"
                                 f"[Visual Element: {canonical_label}]\n"
                                 f"[Caption Extracted: {caption_body}]\n"
+                                f"[Relevant Paragraphs: {context_paragraphs}]\n"
                                 f"[Vision Model Comprehensive Analysis: {vision_description}]\n"
                                 f"=========================================\n\n"
                             )
