@@ -6,32 +6,204 @@ import io
 from openai import OpenAI
 from api_client import generate_image_caption
 
+def _extract_label_components(label: str):
+    """Extract normalized visual type and id from a label string."""
+    lower = label.lower() if label else ""
+    visual_type = "figure" if "fig" in lower else ("table" if "tab" in lower or "tbl" in lower else "")
+
+    # Prefer ids immediately following visual label words to avoid false matches
+    # like the "i" in the word "Figure".
+    scoped_match = re.search(
+        r'(?i)\b(?:fig(?:ure)?|tab(?:le)?|tbl)\.?\s*([0-9]+(?:\.[0-9]+)?[A-Za-z]?|[IVXLCDM]+)\b',
+        label or ""
+    )
+    if scoped_match:
+        return visual_type, scoped_match.group(1).rstrip(').:-')
+
+    # Fallbacks for noisy label strings.
+    digit_match = re.search(r'\b([0-9]+(?:\.[0-9]+)?[A-Za-z]?)\b', label or "")
+    if digit_match:
+        return visual_type, digit_match.group(1).rstrip(').:-')
+
+    roman_match = re.search(r'\b([IVXLCDM]+)\b', label or "")
+    number = roman_match.group(1).rstrip(').:-') if roman_match else ""
+    return visual_type, number
+
 def normalize_label(label: str) -> list:
     """Takes a label like 'Figure 1' or 'Table II' and returns regex variations."""
-    num_match = re.search(r'\d+[\w\.]*|[IVXLCDMivxlcdm]+', label)
-    if not num_match:
+    visual_type, num = _extract_label_components(label)
+    if not num:
         return [label.lower()]
-    num = num_match.group()
-    if "fig" in label.lower():
-        return [rf"\bfigure\s+{num}\b", rf"\bfig\.\s*{num}\b", rf"\bfig\s+{num}\b"]
-    elif "tab" in label.lower():
-        return [rf"\btable\s+{num}\b", rf"\btbl\.\s*{num}\b", rf"\btbl\s+{num}\b", rf"\btab\.\s*{num}\b", rf"\btab\s+{num}\b"]
+    num_esc = re.escape(num)
+
+    # Allow optional spaces/punctuation: Fig 3, Fig.3, Figure 3, Table II, Tbl. 1, etc.
+    if visual_type == "figure":
+        return [
+            rf"\bfigure\s*{num_esc}(?:\b|\))",
+            rf"\bfig(?:ure)?s?\s*\.?\s*{num_esc}(?:\b|\))",
+        ]
+    elif visual_type == "table":
+        return [
+            rf"\btable\s*{num_esc}(?:\b|\))",
+            rf"\btab(?:le)?s?\s*\.?\s*{num_esc}(?:\b|\))",
+            rf"\btbls?\s*\.?\s*{num_esc}(?:\b|\))",
+        ]
     return [label.lower()]
 
-def search_relevant_paragraphs(all_blocks: list, label: str) -> str:
+def search_relevant_paragraphs(all_blocks: list, label: str, caption_body: str = "") -> str:
     if not label or label == "Unknown":
         return "No specific label identified."
     patterns = normalize_label(label)
     combined_regex = re.compile('|'.join(patterns), re.IGNORECASE)
+    visual_type, num = _extract_label_components(label)
+    loose_regex = None
+    if visual_type and num:
+        # Fallback: type token appears close to number token (handles noisy extraction variants).
+        num_esc = re.escape(num)
+        if visual_type == "figure":
+            loose_regex = re.compile(rf"\bfig(?:ure)?s?\b[^\n]{{0,20}}\b{num_esc}(?:\b|\))", re.IGNORECASE)
+        elif visual_type == "table":
+            loose_regex = re.compile(rf"\b(?:table|tab|tbl)s?\b[^\n]{{0,20}}\b{num_esc}(?:\b|\))", re.IGNORECASE)
+
     relevant = []
+    caption_clean = re.sub(r'\s+', ' ', (caption_body or "").strip()).lower()
     for text in all_blocks:
-        if len(text.split()) > 5:
-            clean_text = text.replace('\n', ' ')
-            if combined_regex.search(clean_text):
-                relevant.append(clean_text.strip())
+        clean_text = text.replace('\n', ' ').replace('\xa0', ' ')
+        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+        if len(clean_text.split()) <= 2:
+            continue
+
+        # Skip the caption line itself when searching for contextual references.
+        if caption_clean and clean_text.lower() == caption_clean:
+            continue
+
+        if combined_regex.search(clean_text) or (loose_regex and loose_regex.search(clean_text)):
+            relevant.append(clean_text)
+
+    # De-duplicate while preserving order.
+    relevant = list(dict.fromkeys(relevant))
+
     if not relevant:
         return f"No deep paragraphs explicitly mentioning '{label}' found."
     return "\n...\n".join(relevant)
+
+def _is_heading_like(line: str) -> bool:
+    """Heuristic heading detector so titles/subtitles are kept as boundaries."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+
+    # Common academic section titles
+    if re.match(r'^(abstract|introduction|background|related work|method|methods|materials|results|discussion|conclusion|references|appendix)\b', stripped, re.IGNORECASE):
+        return True
+
+    # Numbered headings (e.g., "2", "2.1", "III.")
+    if re.match(r'^(\d+(\.\d+)*|[IVXLCDMivxlcdm]+)\.?\s+[A-Za-z]', stripped):
+        return True
+
+    words = stripped.split()
+    if len(words) <= 14:
+        if stripped.isupper():
+            return True
+        # Heading-like line usually does not end with sentence punctuation
+        if not re.search(r'[\.!?]$', stripped):
+            capitalized_ratio = sum(1 for w in words if w[:1].isupper()) / max(1, len(words))
+            if capitalized_ratio >= 0.6:
+                return True
+
+    return False
+
+def extract_paragraphs_from_blocks(sorted_blocks: list) -> list:
+    """
+    Reconstruct paragraph-like units from reading-order blocks while preserving
+    headings and avoiding cross-block merges.
+    """
+    paragraphs = []
+
+    for block in sorted_blocks:
+        display_text = block.get("text", "")
+        if "[Visual Element:" in display_text:
+            # Keep visual reports as dedicated chunkable paragraphs.
+            visual_paragraph = re.sub(r'\s+', ' ', display_text).strip()
+            if visual_paragraph:
+                paragraphs.append(visual_paragraph)
+            continue
+
+        raw_text = block.get("raw_text", display_text)
+        if not raw_text:
+            continue
+
+        normalized = raw_text.replace('\ufffd', '').replace('(cid:10)', ' ').replace('(cid:13)', ' ')
+        
+        # Never merge across distinct PyMuPDF blocks. Split only inside each block.
+        # The intelligent \n\n breaks and bullet point logic will take it from here.
+        block_parts = re.split(r'\n\s*\n+', normalized)
+
+        for part in block_parts:
+            lines = [ln.strip() for ln in part.splitlines() if ln.strip()]
+            if not lines:
+                continue
+
+            # If the first line is a heading, keep it as its own paragraph.
+            first_line = re.sub(r'\s+', ' ', lines[0]).strip()
+            if _is_heading_like(first_line):
+                paragraphs.append(first_line)
+                lines = lines[1:]
+                if not lines:
+                    continue
+
+            cleaned = re.sub(r'\s+', ' ', " ".join(lines)).strip()
+            if not cleaned:
+                continue
+
+            # Split inline section patterns such as:
+            # "B. Fixed-Wing UAV The UAV flies ..."
+            inline_heading_match = re.match(
+                r'^((?:[A-Z]|[IVXLCDM]+)\.\s+[A-Za-z][A-Za-z0-9\-/]*(?:\s+[A-Za-z][A-Za-z0-9\-/]*){0,10})\s+(.+)$',
+                cleaned
+            )
+            if inline_heading_match and _is_heading_like(inline_heading_match.group(1)):
+                paragraphs.append(inline_heading_match.group(1).strip())
+                cleaned = inline_heading_match.group(2).strip()
+                if not cleaned:
+                    continue
+
+            # Keep bullets as separate chunkable paragraph units.
+            bullet_parts = re.split(r'\s(?=•\s)', cleaned)
+            for bp in bullet_parts:
+                bp_clean = re.sub(r'\s+', ' ', bp).strip()
+                if bp_clean:
+                    paragraphs.append(bp_clean)
+
+    # Pass everything through a global stitcher to glue cross-column and cross-page breaks
+    return _post_process_and_stitch_paragraphs([p for p in paragraphs if p])
+
+def _post_process_and_stitch_paragraphs(paragraphs: list) -> list:
+    """Stitches cross-column/cross-page paragraph breaks safely."""
+    if not paragraphs: return []
+    merged = []
+    
+    for p in paragraphs:
+        if not merged:
+            merged.append(p)
+            continue
+            
+        prev = merged[-1]
+        
+        if "[Visual Element:" in prev or "[Visual Element:" in p:
+            merged.append(p)
+            continue
+            
+        # Academic hyphenation recovery across columns: e.g. "com-\nputer"
+        if re.search(r'[A-Za-z]-$', prev) and re.match(r'^[a-z]', p):
+            merged[-1] = prev[:-1] + p
+        # Broken mid-sentence across columns: previous doesn't end with sentence terminator, next starts with lowercase
+        elif re.search(r'[^.!?\]\)"\']$', prev) and re.match(r'^[a-z0-9]', p):
+            merged[-1] = prev + " " + p
+        else:
+            merged.append(p)
+            
+    return merged
 
 def merge_visual_rects(page_rects, margin=15, vertical_margin=10):
     """Merges overlapping or nearby geometric bounding boxes to form single coherent visual areas."""
@@ -135,7 +307,7 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
     save_text_dir = "extracted_texts"
     os.makedirs(save_text_dir, exist_ok=True)
     
-    label_pattern = re.compile(r'(?i)^(figure|fig\.?|table|tab\.?)\s+(\d+[\w\.]*|[IVXLCDMivxlcdm]+)(?::|\.|-)?\s*(.*)')
+    label_pattern = re.compile(r'(?i)^\s*(figure|fig\.?|table|tab\.?)\s+(\d+(?:\.\d+)?[A-Za-z]?|[IVXLCDMivxlcdm]+)(?=[\s\)\]:\.-]|$)(?::|\.|-|\))?\s*(.*)')
 
     for file_idx, uploaded_file in enumerate(upload_files):
         filename = uploaded_file.name
@@ -146,7 +318,6 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
         pdf_bytes = uploaded_file.read()
         pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
         
-        all_blocks_flat = []
         page_payloads = []
         
         for page_num in range(len(pdf_document)):
@@ -175,8 +346,66 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
             merged_visuals = merge_visual_rects(raw_rects, margin=15, vertical_margin=10)
             
             # --- 2. Extract Text & Clean Pollutant Labels ---
-            blocks = page.get_text("blocks", flags=fitz.TEXT_DEHYPHENATE)
-            text_blocks = [{"bbox": b[:4], "text": b[4]} for b in blocks if b[-1] == 0]
+            # We use "dict" to preserve geometry accurately.
+            page_dict = page.get_text("dict", flags=fitz.TEXT_DEHYPHENATE)
+            text_blocks = []
+            
+            for b in page_dict.get("blocks", []):
+                if b["type"] == 0:  # Text block
+                    raw_text = ""
+                    lines = b.get("lines", [])
+                    if lines:
+                        block_x1 = max((l["bbox"][2] for l in lines), default=b["bbox"][2])
+                        prev_line_bbox = None
+                        prev_line_text = ""
+                        for line in lines:
+                            spans = line.get("spans", [])
+                            if not spans: continue
+                            
+                            line_text = "".join(span["text"] for span in spans)
+                            bbox = line["bbox"]
+                            
+                            if prev_line_bbox:
+                                # Only a new line if it moved down (prevents superscripts/accents from splitting)
+                                moved_down = bbox[1] > prev_line_bbox[1] + 5.0
+                                
+                                if moved_down:
+                                    true_indent = bbox[0] > prev_line_bbox[0] + 5.0
+                                    gap = bbox[1] - prev_line_bbox[3]
+                                    line_height = prev_line_bbox[3] - prev_line_bbox[1]
+                                    prev_short = prev_line_bbox[2] < block_x1 - 15.0
+                                    
+                                    is_para = False
+                                    
+                                    # 1. Definite large gap between paragraphs
+                                    if gap > line_height * 0.5:
+                                        is_para = True
+                                        
+                                    # 2. True indentation relative to the line before it
+                                    if true_indent:
+                                        pt = prev_line_text.strip()
+                                        # Protect hanging indents from bullet lists/numbered lists
+                                        if not re.match(r"^(?:\?|•|-|\d+\.|[IVXLCDMivxlcdm]+\.)", pt):
+                                            is_para = True
+                                            
+                                    # 3. Previous line was noticeably short, implying sentence/paragraph end
+                                    if prev_short and gap > 0 and bbox[0] >= prev_line_bbox[0] - 2.0:
+                                        is_para = True
+                                        
+                                    if is_para:
+                                        if not raw_text.endswith("\n\n"): raw_text += "\n\n"
+                                    else:
+                                        if not raw_text.endswith("\n"): raw_text += "\n"
+                            
+                                # If it didn't move down, it's part of the same physical line.
+                            
+                            raw_text += line_text
+                            prev_line_bbox = bbox
+                            prev_line_text = line_text
+                    if raw_text:
+                        if not raw_text.endswith("\n"):
+                            raw_text += "\n"
+                    text_blocks.append({"bbox": b["bbox"], "text": raw_text})
 
             clean_text_blocks = []
             for b in text_blocks:
@@ -190,18 +419,24 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                             break
 
                 if not polluted:
-                    # Clear out unnecessary enters and unknown unicode replacements
-                    text = re.sub(r'\s+', ' ', b["text"].replace('\n', ' ').replace('\ufffd', '')).strip()
-                    text = text.replace('(cid:10)', ' ').replace('(cid:13)', ' ')
+                    raw_text = b["text"].replace('\ufffd', '').replace('(cid:10)', ' ').replace('(cid:13)', ' ')
+                    # Keep a cleaned one-line display text while preserving raw text for paragraph reconstruction.
+                    text = re.sub(r'\s+', ' ', raw_text.replace('\n', ' ')).strip()
                     if text:
                         clean_text_blocks.append({
                             "bbox": b["bbox"], 
                             "text": text,
+                            "raw_text": raw_text,
                             "is_caption": False
                         })
-                        all_blocks_flat.append(text)
             
             page_payloads.append((page, clean_text_blocks, merged_visuals))
+
+        # Reconstruct logical paragraphs once from ordered page blocks.
+        all_paragraphs = []
+        for page, text_blocks, _ in page_payloads:
+            ordered_blocks = sort_text_blocks(text_blocks, page.rect.width)
+            all_paragraphs.extend(extract_paragraphs_from_blocks(ordered_blocks))
 
         # --- 3. Link Captions, Sweep Orphaned Labels, Query Vision ---
         full_paper_formatted_text = f"--- START OF PAPER: {filename} ---\n\n"
@@ -214,7 +449,7 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                 
                 if match:
                     label_type = match.group(1).lower()
-                    label_num = match.group(2)
+                    label_num = match.group(2).rstrip(').:-')
                     caption_body = match.group(3).strip()
                     
                     canonical_label = f"Figure {label_num}" if "fig" in label_type else f"Table {label_num}"
@@ -275,7 +510,14 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                                 final_rect.x1 = max(final_rect.x1, caption_rect.x1 + 10)
 
                             final_rect = final_rect.intersect(page.rect)
-                            context_paragraphs = search_relevant_paragraphs(all_blocks_flat, canonical_label)
+                            context_paragraphs = search_relevant_paragraphs(all_paragraphs, canonical_label, caption_body)
+                            if context_paragraphs.startswith("No deep paragraphs explicitly mentioning"):
+                                # Fallback to page-local paragraphs when global matching misses.
+                                page_ordered_blocks = sort_text_blocks(text_blocks, page.rect.width)
+                                page_paragraphs = extract_paragraphs_from_blocks(page_ordered_blocks)
+                                page_context = search_relevant_paragraphs(page_paragraphs, canonical_label, caption_body)
+                                if not page_context.startswith("No deep paragraphs explicitly mentioning"):
+                                    context_paragraphs = page_context
                             
                             safe_filename = filename.replace(".pdf", "")
                             base_name = f"{safe_filename}_Page{page_num+1}_{canonical_label.replace(' ', '_')}"
@@ -313,8 +555,10 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
 
             # Sort intelligently using topological column algorithm (Fixes messy text)
             sorted_blocks = sort_text_blocks(text_blocks, page.rect.width)
-            
-            page_text = "\n\n".join([b["text"] for b in sorted_blocks])
+
+            # Build page text as paragraph-separated units for better chunking quality.
+            page_paragraphs = extract_paragraphs_from_blocks(sorted_blocks)
+            page_text = "\n\n".join(page_paragraphs)
             full_paper_formatted_text += f"\n\n--- Page {page_num + 1} ---\n{page_text}\n\n"
 
         documents_data[filename] = full_paper_formatted_text
