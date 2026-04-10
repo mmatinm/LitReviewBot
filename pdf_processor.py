@@ -1,10 +1,149 @@
 import os
 import fitz  # PyMuPDF
 import re
+from statistics import median
 from PIL import Image
 import io
 from openai import OpenAI
 from api_client import generate_image_caption
+
+def _build_line_text_from_spans(spans: list) -> str:
+    """Reconstruct a line from spans while preserving super/subscript hints."""
+    if not spans:
+        return ""
+
+    ordered = sorted(spans, key=lambda s: (s["bbox"][0], s["bbox"][1]))
+    bottoms = [s["bbox"][3] for s in ordered]
+    sizes = [s.get("size", 0.0) for s in ordered if s.get("size")]
+    baseline = median(bottoms) if bottoms else 0.0
+    base_size = median(sizes) if sizes else 0.0
+
+    out = []
+    prev_x1 = None
+
+    for sp in ordered:
+        txt = (sp.get("text") or "").replace("\xa0", " ")
+        if not txt:
+            continue
+
+        x0, y0, x1, y1 = sp["bbox"]
+
+        if prev_x1 is not None:
+            # Keep natural spacing between far-apart spans on the same baseline.
+            gap = x0 - prev_x1
+            if gap > max(1.8, (base_size * 0.18 if base_size else 2.0)):
+                if out and not out[-1].endswith((" ", "(", "[", "{", "/", "^", "_")):
+                    out.append(" ")
+
+        is_small = bool(base_size) and sp.get("size", base_size) <= base_size * 0.92
+        is_sup = is_small and y1 < baseline - (base_size * 0.12 if base_size else 1.2)
+        is_sub = is_small and y0 > baseline + (base_size * 0.05 if base_size else 0.8)
+
+        if (is_sup or is_sub) and out:
+            compact = re.sub(r"\s+", "", txt)
+            if compact:
+                marker = "^" if is_sup else "_"
+                out.append(f"{marker}({compact})" if len(compact) > 1 else f"{marker}{compact}")
+            else:
+                out.append(txt)
+        else:
+            out.append(txt)
+
+        prev_x1 = x1
+
+    return re.sub(r"\s+", " ", "".join(out)).strip()
+
+def _is_math_like_text(text: str) -> bool:
+    if not text:
+        return False
+    t = re.sub(r"\s+", " ", text).strip()
+    if not t:
+        return False
+
+    math_symbols = len(re.findall(r"[=+\-*/^_∑Σ∫√≤≥≈≠∞⌊⌋]", t))
+    bracket_symbols = len(re.findall(r"[()\[\]{}]", t))
+    alpha_words = len(re.findall(r"[A-Za-z]{2,}", t))
+    has_digit = any(ch.isdigit() for ch in t)
+    has_func = bool(re.search(r"\b(?:sin|cos|tan|cot|sec|csc|log|min|max|arg)\b", t, re.IGNORECASE))
+
+    if math_symbols >= 2:
+        return True
+    if "=" in t and bracket_symbols >= 2:
+        return True
+    if has_func and has_digit:
+        return True
+    return alpha_words <= 8 and bracket_symbols >= 3 and has_digit
+
+def _normalize_math_text(text: str) -> str:
+    """Apply lightweight normalization for powers, sigma limits, and fractions."""
+    t = text
+
+    # Normalize common unicode operator variants.
+    t = t.replace("−", "-").replace("–", "-").replace("—", "-")
+    t = t.replace("⁄", "/").replace("∕", "/")
+
+    # Remove cid artifacts if any survived upstream extraction.
+    t = re.sub(r"\(cid:\d+\)", " ", t)
+
+    # Trig inverse style: tan-1 -> tan^-1.
+    t = re.sub(r"\b(sin|cos|tan|cot|sec|csc)\s*-\s*1\b", r"\1^-1", t, flags=re.IGNORECASE)
+
+    # Common compact variables.
+    t = re.sub(r"\b([A-Za-z])const\b", r"\1_const", t)
+
+    # Powers collapsed during extraction: x2 -> x^2, )2 -> )^2 in math context.
+    t = re.sub(
+        r"([A-Za-zΑ-Ωα-ωϕκσπλμνρτxyuvpk\)\]])\s*(\d+)(?=\s*(?:[+\-*/),=\]]|$))",
+        r"\1^\2",
+        t,
+    )
+
+    # Fraction exponent style: (expr)3/2 -> (expr)^(3/2).
+    t = re.sub(r"(\))\s*(\d+\s*/\s*\d+)\b", r"\1^(\2)", t)
+
+    # Add readable spacing around division.
+    t = re.sub(r"([A-Za-z0-9\)\]])\s*/\s*([A-Za-z0-9\(\[])", r"\1 / \2", t)
+
+    # Sigma limit normalization: Σ i=1 n -> Σ_{i=1}^{n}
+    t = re.sub(r"[∑Σ]\s*([A-Za-z])\s*=\s*([0-9]+)\s*([A-Za-z0-9]+)", r"Σ_{\1=\2}^{\3}", t)
+
+    # Equation number punctuation cleanup.
+    t = re.sub(r"\s*,\s*\((\d+)\)\s*,?", r" (\1)", t)
+
+    return re.sub(r"\s+", " ", t).strip()
+
+def _merge_formula_continuation_lines(lines: list) -> list:
+    """Merge multiline equation fragments, especially stacked fractions."""
+    merged = []
+
+    for raw in lines:
+        line = re.sub(r"\s+", " ", (raw or "")).strip()
+        if not line:
+            continue
+
+        if not merged:
+            merged.append(line)
+            continue
+
+        prev = merged[-1]
+        prev_math = _is_math_like_text(prev)
+        cur_math = _is_math_like_text(line)
+
+        eq_num_only = bool(re.match(r"^[,;]?\s*\(?\d{1,4}\)?[,:;.]?$", line))
+        denominator_like = line.startswith("(") and (
+            "/" in line or bool(re.search(r"\)\s*\d+\s*/\s*\d+\b", line))
+        )
+
+        if eq_num_only and prev_math:
+            merged[-1] = f"{prev} {line}"
+        elif prev_math and cur_math and denominator_like:
+            merged[-1] = f"{prev} / {line}"
+        elif prev_math and cur_math and re.search(r"[=+\-*/^_(]$", prev):
+            merged[-1] = f"{prev} {line}"
+        else:
+            merged.append(line)
+
+    return merged
 
 def _extract_label_components(label: str):
     """Extract normalized visual type and id from a label string."""
@@ -133,7 +272,8 @@ def extract_paragraphs_from_blocks(sorted_blocks: list) -> list:
         if not raw_text:
             continue
 
-        normalized = raw_text.replace('\ufffd', '').replace('(cid:10)', ' ').replace('(cid:13)', ' ')
+        normalized = raw_text.replace('\ufffd', '')
+        normalized = re.sub(r'\(cid:\d+\)', ' ', normalized)
         
         # Never merge across distinct PyMuPDF blocks. Split only inside each block.
         # The intelligent \n\n breaks and bullet point logic will take it from here.
@@ -143,6 +283,8 @@ def extract_paragraphs_from_blocks(sorted_blocks: list) -> list:
             lines = [ln.strip() for ln in part.splitlines() if ln.strip()]
             if not lines:
                 continue
+
+            lines = _merge_formula_continuation_lines(lines)
 
             # If the first line is a heading, keep it as its own paragraph.
             first_line = re.sub(r'\s+', ' ', lines[0]).strip()
@@ -155,6 +297,9 @@ def extract_paragraphs_from_blocks(sorted_blocks: list) -> list:
             cleaned = re.sub(r'\s+', ' ', " ".join(lines)).strip()
             if not cleaned:
                 continue
+
+            if _is_math_like_text(cleaned):
+                cleaned = _normalize_math_text(cleaned)
 
             # Split inline section patterns such as:
             # "B. Fixed-Wing UAV The UAV flies ..."
@@ -197,6 +342,14 @@ def _post_process_and_stitch_paragraphs(paragraphs: list) -> list:
         # Academic hyphenation recovery across columns: e.g. "com-\nputer"
         if re.search(r'[A-Za-z]-$', prev) and re.match(r'^[a-z]', p):
             merged[-1] = prev[:-1] + p
+        # Formula continuation (stacked denominator / equation-number lines).
+        elif _is_math_like_text(prev) and _is_math_like_text(p):
+            if p.startswith("(") and ("/" in p or re.search(r'\)\s*\d+\s*/\s*\d+\b', p)):
+                merged[-1] = _normalize_math_text(f"{prev} / {p}")
+            elif re.match(r'^[,;]?\s*\(?\d{1,4}\)?[,:;.]?$', p):
+                merged[-1] = _normalize_math_text(f"{prev} {p}")
+            else:
+                merged.append(p)
         # Broken mid-sentence across columns: previous doesn't end with sentence terminator, next starts with lowercase
         elif re.search(r'[^.!?\]\)"\']$', prev) and re.match(r'^[a-z0-9]', p):
             merged[-1] = prev + " " + p
@@ -361,8 +514,10 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                         for line in lines:
                             spans = line.get("spans", [])
                             if not spans: continue
-                            
-                            line_text = "".join(span["text"] for span in spans)
+
+                            line_text = _build_line_text_from_spans(spans)
+                            if not line_text:
+                                continue
                             bbox = line["bbox"]
                             
                             if prev_line_bbox:
@@ -419,7 +574,8 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                             break
 
                 if not polluted:
-                    raw_text = b["text"].replace('\ufffd', '').replace('(cid:10)', ' ').replace('(cid:13)', ' ')
+                    raw_text = b["text"].replace('\ufffd', '')
+                    raw_text = re.sub(r'\(cid:\d+\)', ' ', raw_text)
                     # Keep a cleaned one-line display text while preserving raw text for paragraph reconstruction.
                     text = re.sub(r'\s+', ' ', raw_text.replace('\n', ' ')).strip()
                     if text:
@@ -531,6 +687,8 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
 
                                 vision_prompt_instruction = f"The provided image may be imperfectly cropped and contain multiple figures, tables, or irrelevant text. Your STRICT objective is to locate and analyze ONLY the visual named '{canonical_label}' which matches this Original Caption: '{caption_body}'. Completely IGNORE any other graphs, tables, or text surrounding it. Provide a comprehensive summary of ONLY the target visual.\n\nContextual paragraphs from the paper for reference:\n{context_paragraphs}"
                                 vision_description = generate_image_caption(client, vision_model, image_bytes, vision_prompt_instruction)
+                                if not vision_description or str(vision_description).strip().lower() == "none":
+                                    vision_description = "[Image transcription failed: empty response from model]"
 
                                 with open(os.path.join(save_dir, f"{base_name}.txt"), "w", encoding="utf-8") as f:
                                     f.write(f"--- Detected Label ---\n{canonical_label}: {caption_body}\n\n")
@@ -543,7 +701,7 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                                 f"\n\n=========================================\n"
                                 f"[Visual Element: {canonical_label}]\n"
                                 f"[Caption Extracted: {caption_body}]\n"
-                                f"[Relevant Paragraphs: {context_paragraphs}]\n"
+                                #f"[Relevant Paragraphs: {context_paragraphs}]\n"
                                 f"[Vision Model Comprehensive Analysis: {vision_description}]\n"
                                 f"=========================================\n\n"
                             )

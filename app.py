@@ -87,6 +87,12 @@ def main():
                     progress_callback=update_progress,
                     process_visuals=process_visuals_ui
                 )
+
+            with st.spinner("Step 2: Building paragraph-based chunks and vector store..."):
+                st.session_state.vector_store = initialize_vector_store(
+                    st.session_state.documents_data,
+                    progress_callback=update_progress
+                )
     tab1, tab2, tab3 = st.tabs(["Chat", "Summaries", "Literature Review Builder"])
     
     # ------------------

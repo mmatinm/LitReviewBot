@@ -29,13 +29,42 @@ def encode_image(image_bytes: bytes) -> str:
     """Converts image bytes to base64 string."""
     return base64.b64encode(image_bytes).decode("utf-8")
 
+
+def _extract_message_text(content) -> str:
+    """Normalize provider-specific content payloads into plain text."""
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                txt = item.get("text")
+                if txt:
+                    parts.append(str(txt))
+            elif item:
+                parts.append(str(item))
+        return "\n".join(parts).strip()
+    return "" if content is None else str(content).strip()
+
+
+def _looks_incomplete(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return True
+    if len(t) < 120:
+        return True
+    # Common symptom of truncation: abrupt cut without terminal punctuation.
+    if not t.endswith((".", "!", "?", "]", ")", "`", "\"", "'")):
+        return True
+    return False
+
 def generate_image_caption(client: OpenAI, vision_model: str, image_bytes: bytes, context: str) -> str:
     """Send image and surrounding text context to Vision Model to generate a caption."""
+    base64_image = encode_image(image_bytes)
     try:
-        base64_image = encode_image(image_bytes)
         prompt = f"""
         You are an expert scientific image transcriber. 
-        Here is the text found near the image below:
+        Here is the text found near the image below in a scientific paper:
         ---
         {context}
         ---
@@ -43,26 +72,71 @@ def generate_image_caption(client: OpenAI, vision_model: str, image_bytes: bytes
         If so, name it (e.g., 'Figure 1'). Then, provide a detailed but concise textual caption/description of what the image/table shows, 
         including any key data points, trends, or variables.
         """
-        response = client.chat.completions.create(
-            extra_headers=OPENROUTER_HEADERS,
-            model=vision_model,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
+
+        last_error = None
+        for _ in range(2):
+            try:
+                response = client.chat.completions.create(
+                    extra_headers=OPENROUTER_HEADERS,
+                    model=vision_model,
+                    messages=[
                         {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/jpeg;base64,{base64_image}"
-                            }
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{base64_image}"
+                                    }
+                                }
+                            ]
                         }
-                    ]
-                }
-            ],
-            temperature=0.3,
-            max_tokens=600
-        )
-        return response.choices[0].message.content
+                    ],
+                    temperature=0.3,
+                    max_tokens=1000
+                )
+
+                choice = response.choices[0]
+                text = _extract_message_text(choice.message.content)
+
+                if not text or text.strip().lower() == "none":
+                    last_error = "empty response from model"
+                    continue
+
+                finish_reason = getattr(choice, "finish_reason", None)
+                if finish_reason == "length" or _looks_incomplete(text):
+                    # Ask the model to continue so outputs are not cut mid-sentence.
+                    continuation = client.chat.completions.create(
+                        extra_headers=OPENROUTER_HEADERS,
+                        model=vision_model,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": prompt},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:image/jpeg;base64,{base64_image}"
+                                        }
+                                    }
+                                ]
+                            },
+                            {"role": "assistant", "content": text},
+                            {"role": "user", "content": "Continue from exactly where you stopped. Do not repeat earlier lines."}
+                        ],
+                        temperature=0.2,
+                        max_tokens=500
+                    )
+                    cont_text = _extract_message_text(continuation.choices[0].message.content)
+                    if cont_text:
+                        text = f"{text}\n{cont_text}".strip()
+
+                return text
+            except Exception as retry_error:
+                last_error = retry_error
+
+        return f"[Image transcription failed: {last_error}]"
     except Exception as e:
         return f"[Image transcription failed: {e}]"
