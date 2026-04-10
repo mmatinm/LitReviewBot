@@ -8,7 +8,7 @@ VISION_MODELS = [
 ]
 
 TEXT_MODELS = [
-    "qwen/qwen3.6-plus-preview:free",
+    "qwen/qwen3.6-plus",
     "nvidia/nemotron-3-super-120b-a12b:free",
     "stepfun/step-3.5-flash:free",
 ]

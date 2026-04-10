@@ -3,6 +3,12 @@ import re
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 
+_STOPWORDS = {
+    "the", "and", "for", "with", "from", "that", "this", "what", "when", "where", "which",
+    "into", "about", "have", "has", "had", "were", "was", "are", "you", "your", "paper",
+    "papers", "give", "show", "tell", "please", "using", "used", "than", "then", "them",
+}
+
 
 def _is_heading(text: str) -> bool:
     t = (text or "").strip()
@@ -151,6 +157,228 @@ def _save_chunk_preview(preview_dir: str, filename: str, paragraphs: list, chunk
             f.write(chunk)
             f.write("\n\n")
 
+
+def _is_reference_query(query: str) -> bool:
+    q = (query or "").lower()
+    return bool(re.search(r"\b(reference|references|bibliograph|citation|cited works|works cited)\b", q))
+
+
+def _unique_doc_key(doc) -> tuple:
+    meta = doc.metadata or {}
+    source = meta.get("source", "")
+    chunk_id = meta.get("chunk_id", None)
+    # Keep a content fallback so dedupe still works if chunk_id is missing.
+    content_head = (doc.page_content or "")[:120]
+    return (source, chunk_id, content_head)
+
+
+def _query_terms(query: str) -> list:
+    tokens = re.findall(r"[a-zA-Z0-9]{3,}", (query or "").lower())
+    return [t for t in tokens if t not in _STOPWORDS]
+
+
+def _term_hit_count(query: str, text: str) -> int:
+    low = (text or "").lower()
+    terms = _query_terms(query)
+    if not terms:
+        return 0
+    return sum(1 for t in terms if t in low)
+
+
+def _boilerplate_penalty(text: str) -> float:
+    t = (text or "").strip().lower()
+    penalty = 0.0
+    if t.startswith("--- start of paper") or t.startswith("--- page"):
+        penalty += 2.0
+    if "image transcription failed" in t:
+        penalty += 1.5
+    if len(t) < 90:
+        penalty += 0.8
+    return penalty
+
+
+def _dense_component(doc) -> float:
+    score = (doc.metadata or {}).get("_dense_score", None)
+    if score is None:
+        return 0.0
+    try:
+        s = float(score)
+    except Exception:
+        return 0.0
+    # FAISS returns distance-like values where smaller is better.
+    return 1.0 / (1.0 + max(0.0, s))
+
+
+def _rank_docs_for_query(query: str, docs: list) -> list:
+    if not docs:
+        return []
+
+    is_ref = _is_reference_query(query)
+    terms = _query_terms(query)
+
+    def score(doc):
+        txt = (doc.page_content or "").lower()
+        bonus = 0.0
+        bonus += _dense_component(doc)
+
+        if terms:
+            hits = sum(1 for t in terms if t in txt)
+            bonus += min(4.0, 0.7 * hits)
+
+        # Boost exact short phrase containment for intent-like questions.
+        query_norm = " ".join(re.findall(r"[a-zA-Z0-9]+", (query or "").lower()))
+        if query_norm and query_norm in " ".join(re.findall(r"[a-zA-Z0-9]+", txt)):
+            bonus += 1.0
+
+        if "references" in txt or "bibliography" in txt or "works cited" in txt:
+            bonus += 3.0 if is_ref else -0.6
+        if re.search(r"\[[0-9]+\]", txt):
+            bonus += 0.8 if not is_ref else 1.0
+        if re.search(r"\([12][0-9]{3}\)", txt):
+            bonus += 0.6 if not is_ref else 1.0
+
+        bonus -= _boilerplate_penalty(txt)
+        return bonus
+
+    return sorted(docs, key=score, reverse=True)
+
+
+def _reference_lexical_scan(vector_store, source_filter: str = None, limit: int = 30) -> list:
+    """Fallback lexical scan for references-style content in stored chunks."""
+    results = []
+    try:
+        all_docs = list(vector_store.docstore._dict.values())
+    except Exception:
+        return results
+
+    for d in all_docs:
+        meta = d.metadata or {}
+        if source_filter and meta.get("source") != source_filter:
+            continue
+
+        txt = (d.page_content or "")
+        low = txt.lower()
+        score = 0
+
+        if "references" in low or "bibliography" in low or "works cited" in low:
+            score += 4
+        if re.search(r"\[[0-9]{1,3}\]", txt):
+            score += 2
+        if re.search(r"\([12][0-9]{3}\)", txt):
+            score += 1
+        if re.search(r"\bdoi\b|arxiv|ieee|springer|acm", low):
+            score += 1
+
+        if score > 0:
+            results.append((score, d))
+
+    results.sort(key=lambda x: x[0], reverse=True)
+    return [d for _, d in results[:limit]]
+
+
+def _query_lexical_scan(vector_store, query: str, source_filter: str = None, limit: int = 30) -> list:
+    """Fallback lexical scan for generic questions when dense retrieval misses obvious term hits."""
+    results = []
+    try:
+        all_docs = list(vector_store.docstore._dict.values())
+    except Exception:
+        return results
+
+    for d in all_docs:
+        meta = d.metadata or {}
+        if source_filter and meta.get("source") != source_filter:
+            continue
+
+        txt = d.page_content or ""
+        hits = _term_hit_count(query, txt)
+        if hits <= 0:
+            continue
+
+        # Penalize boilerplate-like chunks even if they contain generic query terms.
+        score = float(hits) - _boilerplate_penalty(txt)
+        if score > 0:
+            results.append((score, d))
+
+    results.sort(key=lambda x: x[0], reverse=True)
+    return [d for _, d in results[:limit]]
+
+
+def retrieve_docs(vector_store, query: str, k: int = 8, source_filter: str = None) -> list:
+    """Retrieve relevant docs with optional source filter and references-aware fallback."""
+    if not vector_store:
+        return []
+
+    filter_dict = {"source": source_filter} if source_filter else None
+    is_ref_query = _is_reference_query(query)
+    primary_k = max(k, 20) if is_ref_query else k
+
+    docs = []
+    try:
+        scored = vector_store.similarity_search_with_score(query, k=primary_k, filter=filter_dict)
+        for d, score in scored:
+            meta = dict(d.metadata or {})
+            meta["_dense_score"] = float(score)
+            d.metadata = meta
+            docs.append(d)
+    except Exception:
+        docs = vector_store.similarity_search(query, k=primary_k, filter=filter_dict)
+
+    if is_ref_query:
+        # Add targeted fallback retrieval focused on reference sections.
+        ref_queries = [
+            f"{query} references bibliography",
+            "references bibliography works cited",
+        ]
+        merged = {}
+        for d in docs:
+            merged[_unique_doc_key(d)] = d
+
+        for rq in ref_queries:
+            try:
+                extra_scored = vector_store.similarity_search_with_score(rq, k=primary_k, filter=filter_dict)
+                for d, score in extra_scored:
+                    meta = dict(d.metadata or {})
+                    meta["_dense_score"] = float(score)
+                    d.metadata = meta
+                    merged[_unique_doc_key(d)] = d
+            except Exception:
+                extra = vector_store.similarity_search(rq, k=primary_k, filter=filter_dict)
+                for d in extra:
+                    merged[_unique_doc_key(d)] = d
+
+        lexical = _reference_lexical_scan(vector_store, source_filter=source_filter, limit=max(20, k * 4))
+        for d in lexical:
+            merged[_unique_doc_key(d)] = d
+
+        docs = list(merged.values())
+
+    docs = _rank_docs_for_query(query, docs)
+
+    # For non-reference questions, prefer chunks with explicit lexical overlap.
+    if not is_ref_query:
+        with_hits = [d for d in docs if _term_hit_count(query, d.page_content) > 0]
+        if with_hits:
+            return with_hits[:k]
+
+        lexical = _query_lexical_scan(vector_store, query=query, source_filter=source_filter, limit=max(20, k * 4))
+        if lexical:
+            merged = {}
+            for d in docs:
+                merged[_unique_doc_key(d)] = d
+            for d in lexical:
+                merged[_unique_doc_key(d)] = d
+            reranked = _rank_docs_for_query(query, list(merged.values()))
+            with_hits = [d for d in reranked if _term_hit_count(query, d.page_content) > 0]
+            if with_hits:
+                return with_hits[:k]
+
+    return docs[:k]
+
+
+def retrieve_context(vector_store, query: str, k: int = 5, source_filter: str = None) -> str:
+    docs = retrieve_docs(vector_store, query=query, k=k, source_filter=source_filter)
+    return "\n\n".join([doc.page_content for doc in docs])
+
 def initialize_vector_store(documents_data: dict, progress_callback=None):
     """
     Chunks the combined text and captions from multiple papers 
@@ -168,9 +396,9 @@ def initialize_vector_store(documents_data: dict, progress_callback=None):
         merged_paragraphs = _merge_short_paragraphs(paragraphs)
         doc_chunks = _build_chunks_from_paragraphs(merged_paragraphs, chunk_size=1400, overlap_paragraphs=0)
 
-        for c in doc_chunks:
+        for chunk_id, c in enumerate(doc_chunks):
             chunks.append(c)
-            metadatas.append({"source": filename})
+            metadatas.append({"source": filename, "chunk_id": chunk_id})
 
         try:
             _save_chunk_preview(preview_dir, filename, merged_paragraphs, doc_chunks)
@@ -194,10 +422,3 @@ def initialize_vector_store(documents_data: dict, progress_callback=None):
         progress_callback("Vector store initialized successfully. Chunk previews saved in chunk_previews/.")
         
     return vector_store
-
-def retrieve_context(vector_store, query: str, k: int = 5) -> str:
-    """Helper to retrieve 'k' similar chunks."""
-    if not vector_store:
-        return ""
-    docs = vector_store.similarity_search(query, k=k)
-    return "\n\n".join([doc.page_content for doc in docs])

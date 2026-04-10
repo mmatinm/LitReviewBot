@@ -2,6 +2,31 @@ import base64
 from openai import OpenAI
 from config import OPENROUTER_BASE_URL, OPENROUTER_HEADERS
 
+
+def _sanitize_headers_ascii(headers: dict) -> dict:
+    """HTTP header values must be ASCII-safe for some transports."""
+    safe = {}
+    for k, v in (headers or {}).items():
+        key = str(k).encode("ascii", "ignore").decode("ascii")
+        val = str(v).encode("ascii", "ignore").decode("ascii")
+        safe[key] = val
+    return safe
+
+
+def _normalize_text_quotes(text: str) -> str:
+    if text is None:
+        return ""
+    # Replace common smart punctuation that can trigger strict encoders.
+    return (
+        str(text)
+        .replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+    )
+
 def get_openrouter_client(api_key: str) -> OpenAI:
     """Initializes the OpenAI client pointing to OpenRouter."""
     return OpenAI(
@@ -9,19 +34,52 @@ def get_openrouter_client(api_key: str) -> OpenAI:
         api_key=api_key,
     )
 
-def call_openrouter(client: OpenAI, model: str, prompt: str, system_prompt: str = "You vary your tone based on instructions.", temperature: float = 0.5) -> str:
+def call_openrouter(
+    client: OpenAI,
+    model: str,
+    prompt: str,
+    system_prompt: str = "You vary your tone based on instructions.",
+    temperature: float = 0.5,
+    max_tokens: int = 1200,
+) -> str:
     """Standard call to a Text Model on OpenRouter."""
     try:
+        safe_headers = _sanitize_headers_ascii(OPENROUTER_HEADERS)
+        safe_system_prompt = _normalize_text_quotes(system_prompt)
+        safe_prompt = _normalize_text_quotes(prompt)
+
         response = client.chat.completions.create(
-            extra_headers=OPENROUTER_HEADERS,
+            extra_headers=safe_headers,
             model=model,
             messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": safe_system_prompt},
+                {"role": "user", "content": safe_prompt}
             ],
-            temperature=temperature
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
         return response.choices[0].message.content
+    except UnicodeEncodeError:
+        # Hard fallback for environments/transports that still enforce ASCII.
+        try:
+            safe_headers = _sanitize_headers_ascii(OPENROUTER_HEADERS)
+            ascii_system_prompt = _normalize_text_quotes(system_prompt).encode("ascii", "ignore").decode("ascii")
+            ascii_prompt = _normalize_text_quotes(prompt).encode("ascii", "ignore").decode("ascii")
+            ascii_model = str(model).encode("ascii", "ignore").decode("ascii") or str(model)
+
+            response = client.chat.completions.create(
+                extra_headers=safe_headers,
+                model=ascii_model,
+                messages=[
+                    {"role": "system", "content": ascii_system_prompt},
+                    {"role": "user", "content": ascii_prompt}
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"Error calling Main Text Model: {e}"
     except Exception as e:
         return f"Error calling Main Text Model: {e}"
 
