@@ -389,7 +389,8 @@ def initialize_vector_store(documents_data: dict, progress_callback=None):
 
     chunks = []
     metadatas = []
-    preview_dir = "chunk_previews"
+    # Early-release mode: chunk preview file export is intentionally disabled.
+    # preview_dir = "chunk_previews"
 
     for filename, text in documents_data.items():
         paragraphs = _split_to_paragraphs(text)
@@ -400,11 +401,12 @@ def initialize_vector_store(documents_data: dict, progress_callback=None):
             chunks.append(c)
             metadatas.append({"source": filename, "chunk_id": chunk_id})
 
-        try:
-            _save_chunk_preview(preview_dir, filename, merged_paragraphs, doc_chunks)
-        except Exception as e:
-            if progress_callback:
-                progress_callback(f"Could not save chunk preview for {filename}: {e}")
+        # Early-release mode: chunk preview file export is intentionally disabled.
+        # try:
+        #     _save_chunk_preview(preview_dir, filename, merged_paragraphs, doc_chunks)
+        # except Exception as e:
+        #     if progress_callback:
+        #         progress_callback(f"Could not save chunk preview for {filename}: {e}")
     
     if not chunks:
         if progress_callback:
@@ -419,6 +421,6 @@ def initialize_vector_store(documents_data: dict, progress_callback=None):
     vector_store = FAISS.from_texts(chunks, embeddings, metadatas=metadatas)
     
     if progress_callback:
-        progress_callback("Vector store initialized successfully. Chunk previews saved in chunk_previews/.")
+        progress_callback("Vector store initialized successfully.")
         
     return vector_store

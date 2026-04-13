@@ -1,5 +1,7 @@
 import streamlit as st
 import os
+import io
+import zipfile
 from config import VISION_MODELS, TEXT_MODELS
 from api_client import get_openrouter_client, call_openrouter
 from pdf_processor import extract_pdf_data
@@ -26,6 +28,22 @@ def _load_uploaded_text_documents(uploaded_text_files, progress_callback=None):
             name = f"{base}_uploaded_{idx + 1}{ext}"
         docs[name] = text
     return docs
+
+
+def _processed_text_filename(source_name: str) -> str:
+    base, ext = os.path.splitext(source_name)
+    if ext.lower() == ".txt":
+        return os.path.basename(source_name)
+    return f"{os.path.basename(base)}_processed_text.txt"
+
+
+def _build_processed_text_zip(documents_data: dict) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for source_name, content in documents_data.items():
+            zf.writestr(_processed_text_filename(source_name), content)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 # ==========================================
 # Configuration & Setup
@@ -90,8 +108,9 @@ def main():
         st.session_state.chat_history = []
     if "summaries" not in st.session_state:
         st.session_state.summaries = {}
-    if "last_retrieval_debug" not in st.session_state:
-        st.session_state.last_retrieval_debug = None
+    # Early-release mode: retrieval debug state intentionally disabled.
+    # if "last_retrieval_debug" not in st.session_state:
+    #     st.session_state.last_retrieval_debug = None
         
     # ------------------
     # Processing Phase
@@ -145,7 +164,7 @@ def main():
                     st.session_state.documents_data,
                     progress_callback=update_progress
                 )
-    tab1, tab2, tab3 = st.tabs(["Chat", "Summaries", "Literature Review Builder"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Chat", "Summaries", "Literature Review Builder", "Processed Text Files"])
     
     # ------------------
     # TAB 1: Chat 
@@ -168,12 +187,13 @@ def main():
             )
             chat_focus_paper = None if chosen == "All papers" else chosen
 
-        show_retrieval_debug = st.checkbox(
-            "Show retrieval debug",
-            value=False,
-            key="show_retrieval_debug",
-            help="Displays the chunks retrieved for the latest Chat question.",
-        )
+        # Early-release mode: retrieval debug panel intentionally disabled.
+        # show_retrieval_debug = st.checkbox(
+        #     "Show retrieval debug",
+        #     value=False,
+        #     key="show_retrieval_debug",
+        #     help="Displays the chunks retrieved for the latest Chat question.",
+        # )
 
         # Display chat history
         for msg in st.session_state.chat_history:
@@ -203,21 +223,22 @@ def main():
                 # Keep prompts cost-safe while preserving enough evidence for grounded answers.
                 context = context[:12000]
 
-                st.session_state.last_retrieval_debug = {
-                    "query": user_query,
-                    "source_filter": chat_focus_paper,
-                    "doc_count": len(retrieved_docs),
-                    "context_chars": len(context),
-                    "docs": [
-                        {
-                            "source": (d.metadata or {}).get("source", "unknown"),
-                            "chunk_id": (d.metadata or {}).get("chunk_id", "?"),
-                            "char_len": len(d.page_content or ""),
-                            "preview": (d.page_content or "")[:280],
-                        }
-                        for d in retrieved_docs
-                    ],
-                }
+                # Early-release mode: retrieval debug payload intentionally disabled.
+                # st.session_state.last_retrieval_debug = {
+                #     "query": user_query,
+                #     "source_filter": chat_focus_paper,
+                #     "doc_count": len(retrieved_docs),
+                #     "context_chars": len(context),
+                #     "docs": [
+                #         {
+                #             "source": (d.metadata or {}).get("source", "unknown"),
+                #             "chunk_id": (d.metadata or {}).get("chunk_id", "?"),
+                #             "char_len": len(d.page_content or ""),
+                #             "preview": (d.page_content or "")[:280],
+                #         }
+                #         for d in retrieved_docs
+                #     ],
+                # }
                 
                 scope_hint = f"Retrieval scope is only this paper: {chat_focus_paper}." if chat_focus_paper else "Retrieval scope includes all uploaded papers."
                 prompt = f"""
@@ -239,17 +260,18 @@ def main():
                 st.session_state.chat_history.append({"role": "assistant", "content": answer})
                 st.rerun()
 
-        if show_retrieval_debug and st.session_state.last_retrieval_debug:
-            dbg = st.session_state.last_retrieval_debug
-            with st.expander("Retrieval Debug", expanded=False):
-                st.caption(
-                    f"Query: {dbg['query']} | Scope: {dbg['source_filter'] or 'All papers'} | Retrieved: {dbg['doc_count']} chunks | Context chars sent: {dbg['context_chars']}"
-                )
-                for i, item in enumerate(dbg["docs"], start=1):
-                    st.markdown(
-                        f"**{i}. {item['source']} | chunk_id={item['chunk_id']} | chars={item['char_len']}**"
-                    )
-                    st.text(item["preview"])
+        # Early-release mode: retrieval debug panel intentionally disabled.
+        # if show_retrieval_debug and st.session_state.last_retrieval_debug:
+        #     dbg = st.session_state.last_retrieval_debug
+        #     with st.expander("Retrieval Debug", expanded=False):
+        #         st.caption(
+        #             f"Query: {dbg['query']} | Scope: {dbg['source_filter'] or 'All papers'} | Retrieved: {dbg['doc_count']} chunks | Context chars sent: {dbg['context_chars']}"
+        #         )
+        #         for i, item in enumerate(dbg["docs"], start=1):
+        #             st.markdown(
+        #                 f"**{i}. {item['source']} | chunk_id={item['chunk_id']} | chars={item['char_len']}**"
+        #             )
+        #             st.text(item["preview"])
 
     # ------------------
     # TAB 2: Summaries
@@ -335,6 +357,38 @@ def main():
                 with st.spinner(f"Synthesizing {review_type} Literature Review..."):
                     lit_review = call_openrouter(client, text_model, prompt, temperature=0.4, max_tokens=2200)
                     st.markdown(lit_review)
+
+    # ------------------
+    # TAB 4: Processed Text Exports
+    # ------------------
+    with tab4:
+        st.header("Processed Text Files")
+        st.caption("Download the processed text output for each uploaded paper. The content is not previewed here.")
+
+        if st.session_state.documents_data:
+            docs = st.session_state.documents_data
+            zip_bytes = _build_processed_text_zip(docs)
+
+            st.download_button(
+                "Download all processed texts (.zip)",
+                data=zip_bytes,
+                file_name="processed_papers_texts.zip",
+                mime="application/zip",
+                key="download_all_processed_texts",
+            )
+
+            st.subheader("Download by paper")
+            for idx, (source_name, content) in enumerate(docs.items(), start=1):
+                export_name = _processed_text_filename(source_name)
+                st.download_button(
+                    label=f"Download {export_name}",
+                    data=content.encode("utf-8"),
+                    file_name=export_name,
+                    mime="text/plain",
+                    key=f"download_processed_text_{idx}",
+                )
+        else:
+            st.info("Upload and process papers first to enable downloads.")
 
 if __name__ == "__main__":
     main()
