@@ -62,7 +62,7 @@ def main():
     # ------------------
     with st.sidebar:
         st.header("⚙️ Configuration")
-        
+
         api_key = st.text_input("OpenRouter API Key", type="password")
         if not api_key:
             st.warning("Please enter your OpenRouter API Key to proceed.")
