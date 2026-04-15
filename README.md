@@ -13,10 +13,8 @@ It helps you:
 
 ### 1. What you need
 
-1. Windows
-2. Internet connection
-3. OpenRouter API key
-4. The release package files in one folder:
+1. OpenRouter API key
+2. The release package files in one folder:
    - LitReviewBot.exe
    - Run-LitReviewBot.bat
    - README.txt
