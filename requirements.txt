@@ -71,8 +71,6 @@ pydantic==2.12.5
 pydantic_core==2.41.5
 pydeck==0.9.1
 Pygments==2.20.0
-pyinstaller==6.19.0
-pyinstaller-hooks-contrib==2026.4
 PyMuPDF==1.24.0
 PyMuPDFb==1.24.0
 pypdfium2==5.6.0

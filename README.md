@@ -16,19 +16,16 @@ It helps you:
 1. Windows
 2. Internet connection
 3. OpenRouter API key
-4. The release package files in one folder:
-   - LitReviewBot.exe
-   - Run-LitReviewBot.bat
-   - README.txt
+4. The project source files in one folder.
 
 ### 2. How to run the app
 
-1. Download and extract the release zip.
-2. Open the extracted folder.
-3. Double-click Run-LitReviewBot.bat.
-4. If Windows asks about network access, click Allow.
-5. Your browser should open the app.
-6. If browser does not open, manually go to:
+1. Open a PowerShell window in the project folder.
+2. Start the app with:
+   - `python -m streamlit run app.py`
+3. If Windows asks about network access, click Allow.
+4. Your browser should open the app.
+5. If browser does not open, manually go to:
    - http://localhost:8501
 
 ### 3. Get your OpenRouter API key
@@ -60,7 +57,7 @@ This screenshot shows where to:
 - enter API key
 - choose vision/text models
 - upload documents
-- enable visual processing
+- upload documents for processing
 - click process Papers
 
 ![Sidebar Configuration and Upload](docs/images/sidebar-configuration-upload.png)
@@ -104,7 +101,7 @@ LaTeX equations, formatted tables, and extracted images.
 2. Verify the CLI:
    - `marker_single --help`
 3. Start the app:
-   - `python run_bot.py`
+   - `python -m streamlit run app.py`
 4. Upload a PDF and click **process Papers**. Marker is selected automatically.
 
 Marker mode uses `fast` mode and disables multiprocessing to reduce CPU/RAM usage. It does not use OpenRouter or an LLM during parsing. Marker output is copied to `extracted_visuals/marker_<paper_name>/`. Text is kept in the current Streamlit session and can be downloaded explicitly from the **Processed Text Files** tab.

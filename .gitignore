@@ -6,7 +6,3 @@ extracted_texts/
 extracted_texts/zellener_extracted_text.txt
 chunk_previews/
 .deps_stamp
-build/
-dist/
-release/
-*.spec
