@@ -455,11 +455,8 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
     documents_data = {}  
     total_files = len(upload_files)
     
-    # Early-release mode: local artifact exports are intentionally disabled.
-    # save_dir = "extracted_visuals"
-    # os.makedirs(save_dir, exist_ok=True)
-    # save_text_dir = "extracted_texts"
-    # os.makedirs(save_text_dir, exist_ok=True)
+    save_dir = "extracted_visuals"
+    os.makedirs(save_dir, exist_ok=True)
     
     label_pattern = re.compile(r'(?i)^\s*(figure|fig\.?|table|tab\.?)\s+(\d+(?:\.\d+)?[A-Za-z]?|[IVXLCDMivxlcdm]+)(?=[\s\)\]:\.-]|$)(?::|\.|-|\))?\s*(.*)')
 
@@ -683,20 +680,18 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                                 pix = page.get_pixmap(clip=final_rect, dpi=200) 
                                 image_bytes = pix.tobytes("jpeg")
 
-                                # Early-release mode: skip saving cropped visual images to disk.
-                                # with open(os.path.join(save_dir, f"{base_name}.jpg"), "wb") as f:
-                                #     f.write(image_bytes)
+                                with open(os.path.join(save_dir, f"{base_name}.jpg"), "wb") as f:
+                                    f.write(image_bytes)
 
                                 vision_prompt_instruction = f"The provided image may be imperfectly cropped and contain multiple figures, tables, or irrelevant text. Your STRICT objective is to locate and analyze ONLY the visual named '{canonical_label}' which matches this Original Caption: '{caption_body}'. Completely IGNORE any other graphs, tables, or text surrounding it. Provide a comprehensive summary of ONLY the target visual.\n\nContextual paragraphs from the paper for reference:\n{context_paragraphs}"
                                 vision_description = generate_image_caption(client, vision_model, image_bytes, vision_prompt_instruction)
                                 if not vision_description or str(vision_description).strip().lower() == "none":
                                     vision_description = "[Image transcription failed: empty response from model]"
 
-                                # Early-release mode: skip saving per-visual text reports to disk.
-                                # with open(os.path.join(save_dir, f"{base_name}.txt"), "w", encoding="utf-8") as f:
-                                #     f.write(f"--- Detected Label ---\n{canonical_label}: {caption_body}\n\n")
-                                #     f.write(f"--- Relevant Text Paragraphs ---\n{context_paragraphs}\n\n")
-                                #     f.write(f"--- Extracted Model Description ---\n{vision_description}\n")
+                                with open(os.path.join(save_dir, f"{base_name}.txt"), "w", encoding="utf-8") as f:
+                                    f.write(f"--- Detected Label ---\n{canonical_label}: {caption_body}\n\n")
+                                    f.write(f"--- Relevant Text Paragraphs ---\n{context_paragraphs}\n\n")
+                                    f.write(f"--- Extracted Model Description ---\n{vision_description}\n")
                             else:
                                 vision_description = "Visual AI processing disabled by user to conserve OpenRouter API limit. Visual files were not saved."
                             
@@ -724,13 +719,4 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
 
         documents_data[filename] = full_paper_formatted_text
         
-        # Early-release mode: skip saving full extracted text dumps to disk.
-        # safe_filename = filename.replace(".pdf", "")
-        # text_dump_path = os.path.join(save_text_dir, f"{safe_filename}_extracted_text.txt")
-        # try:
-        #     with open(text_dump_path, "w", encoding="utf-8") as dump_f:
-        #         dump_f.write(full_paper_formatted_text)
-        # except Exception as e:
-        #     print(f"Skipped saving text dump: {e}")
-            
     return documents_data

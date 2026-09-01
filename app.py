@@ -2,10 +2,20 @@ import streamlit as st
 import os
 import io
 import zipfile
-from config import VISION_MODELS, TEXT_MODELS
+from types import SimpleNamespace
+from config import TEXT_MODELS
 from api_client import get_openrouter_client, call_openrouter
-from pdf_processor import extract_pdf_data
+from marker_processor import extract_pdf_data_with_marker
 from vector_store import initialize_vector_store, retrieve_context, retrieve_docs
+
+
+def _prepare_reusable_uploaded_pdfs(uploaded_pdf_files):
+    """Cache PDF bytes once so multiple parser backends can read safely."""
+    reusable = []
+    for f in uploaded_pdf_files:
+        data = f.read()
+        reusable.append(SimpleNamespace(name=f.name, read=lambda d=data: d))
+    return reusable
 
 
 def _load_uploaded_text_documents(uploaded_text_files, progress_callback=None):
@@ -69,16 +79,6 @@ def main():
             st.markdown("[Get one here](https://openrouter.ai/keys)")
         
         st.subheader("Model Selection")
-        # Allow typing custom or selecting from preset
-        vision_model_input = st.selectbox(
-            "Vision Model (For Images/Tables)",
-            options=VISION_MODELS,
-            index=0,
-            help="Select a vision-capable model or type a valid OpenRouter Vision model ID."
-        )
-        custom_vision = st.text_input("Or type custom Vision Model ID:")
-        vision_model = custom_vision if custom_vision else vision_model_input
-
         text_model_input = st.selectbox(
             "Main Text Model (For Q&A/Reviews)",
             options=TEXT_MODELS,
@@ -96,7 +96,9 @@ def main():
             help="Upload new papers as .pdf. If a paper was already processed before, upload its extracted .txt instead to skip PDF/vision processing.",
         )
 
-        process_visuals_ui = st.checkbox("Process tables and figures with AI for uploaded PDFs (High Usage)", value=False, help="Applies only to uploaded PDFs. WARNING: This consumes a considerable amount of your OpenRouter usage limit and increases processing time. TXT inputs skip this step.")
+        st.info("PDFs are parsed with Marker. If Marker fails, processing stops so the error can be debugged directly.")
+
+        st.caption("Marker exports Markdown, formulas, tables, and extracted images to extracted_visuals for debugging.")
         process_btn = st.button("process Papers")
 
     # State variables
@@ -119,16 +121,14 @@ def main():
         uploaded_documents = uploaded_documents or []
         uploaded_files = [f for f in uploaded_documents if f.name.lower().endswith(".pdf")]
         uploaded_text_files = [f for f in uploaded_documents if f.name.lower().endswith(".txt")]
+        reusable_uploaded_files = _prepare_reusable_uploaded_pdfs(uploaded_files) if uploaded_files else []
 
-        has_pdf = bool(uploaded_files)
+        has_pdf = bool(reusable_uploaded_files)
         has_uploaded_txt = bool(uploaded_text_files)
 
         if not (has_pdf or has_uploaded_txt):
             st.sidebar.error("Please upload PDFs and/or TXT files.")
-        elif has_pdf and process_visuals_ui and not api_key:
-            st.sidebar.error("API Key missing! Required when visual processing is enabled.")
         else:
-            client = get_openrouter_client(api_key) if (api_key and process_visuals_ui) else None
             status_text = st.empty()
             
             def update_progress(msg: str):
@@ -136,16 +136,19 @@ def main():
             
             docs_from_pdf = {}
             docs_from_uploaded_txt = {}
+            extraction_failed = False
 
             if has_pdf:
-                with st.spinner("Extracting text from PDFs..."):
-                    docs_from_pdf = extract_pdf_data(
-                        uploaded_files,
-                        client,
-                        vision_model,
-                        progress_callback=update_progress,
-                        process_visuals=process_visuals_ui,
-                    )
+                with st.spinner("Extracting text from PDFs with Marker..."):
+                    try:
+                        docs_from_pdf = extract_pdf_data_with_marker(
+                            reusable_uploaded_files,
+                            progress_callback=update_progress,
+                            mode="fast",
+                        )
+                    except Exception as e:
+                        st.sidebar.error(f"Marker extraction failed: {e}")
+                        extraction_failed = True
 
             if has_uploaded_txt:
                 with st.spinner("Loading uploaded TXT files..."):
@@ -153,6 +156,9 @@ def main():
                         uploaded_text_files,
                         progress_callback=update_progress,
                     )
+
+            if extraction_failed:
+                st.stop()
 
             combined_docs = {}
             combined_docs.update(docs_from_uploaded_txt)

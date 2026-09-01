@@ -44,7 +44,7 @@ It helps you:
 1. In sidebar, select models (or keep defaults).
 2. Upload files in Document Upload:
    - supported: PDF, TXT
-3. Optional: turn on Process tables and figures with AI for PDFs.
+3. PDFs are processed automatically with local Marker in CPU-only mode.
 4. Click process Papers.
 5. Use tabs in the main area:
    - Chat
@@ -93,6 +93,26 @@ This screenshot shows where to:
 - Download processed text for each paper.
 - Download all processed texts as one zip.
 
+### 7. Marker PDF extraction
+
+Marker is the app's automatic local PDF processor. It produces Markdown with
+LaTeX equations, formatted tables, and extracted images.
+
+1. Install the project dependencies, including Marker:
+   - `python -m pip install -r requirements.txt`
+   - Or only Marker: `python -m pip install marker-pdf`
+2. Verify the CLI:
+   - `marker_single --help`
+3. Start the app:
+   - `python run_bot.py`
+4. Upload a PDF and click **process Papers**. Marker is selected automatically.
+
+Marker mode uses `fast` mode and disables multiprocessing to reduce CPU/RAM usage. It does not use OpenRouter or an LLM during parsing. Marker output is copied to `extracted_visuals/marker_<paper_name>/`. Text is kept in the current Streamlit session and can be downloaded explicitly from the **Processed Text Files** tab.
+
+For difficult scanned or math-heavy PDFs, Marker supports higher-accuracy modes and optional LLM correction, but those require more local resources or API usage and are intentionally not enabled by this integration.
+
+The current `requirements.txt` is the Marker profile. MinerU is not part of this application.
+
 
 ## Disclaimer (Early Release)
 
@@ -135,4 +155,3 @@ Please read these points before using the app.
 1. Use this tool only for legal and ethical work.
 2. Follow copyright and data-use rules for all uploaded papers.
 3. You are responsible for your usage and outputs.
-
