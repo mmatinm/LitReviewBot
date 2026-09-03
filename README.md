@@ -7,7 +7,7 @@ It helps you:
 - ask questions about your papers
 - generate paper summaries
 - generate a cross-paper literature review
-- download processed text files
+- retain processed text in the app session
 
 ## How to Run and Use
 
@@ -47,7 +47,6 @@ It helps you:
    - Chat
    - Summaries
    - Literature Review Builder
-   - Processed Text Files
 
 ### 5. UI guide
 
@@ -55,7 +54,7 @@ It helps you:
 
 This screenshot shows where to:
 - enter API key
-- choose vision/text models
+- choose the text model
 - upload documents
 - upload documents for processing
 - click process Papers
@@ -68,7 +67,6 @@ This screenshot shows where to:
 - switch between tabs
 - ask questions in Chat
 - generate summaries and literature reviews
-- download processed text files
 
 ![Main Tabs and Chat Area](docs/images/main-tabs-chat-area.png)
 
@@ -86,10 +84,6 @@ This screenshot shows where to:
 - Choose short or long output.
 - Optionally include figure/table mentions.
 
-#### Processed Text Files
-- Download processed text for each paper.
-- Download all processed texts as one zip.
-
 ### 7. Marker PDF extraction
 
 Marker is the app's automatic local PDF processor. It produces Markdown with
@@ -104,7 +98,7 @@ LaTeX equations, formatted tables, and extracted images.
    - `python -m streamlit run app.py`
 4. Upload a PDF and click **process Papers**. Marker is selected automatically.
 
-Marker mode uses `fast` mode and disables multiprocessing to reduce CPU/RAM usage. It does not use OpenRouter or an LLM during parsing. Marker output is copied to `extracted_visuals/marker_<paper_name>/`. Text is kept in the current Streamlit session and can be downloaded explicitly from the **Processed Text Files** tab.
+Marker mode uses `fast` mode and disables multiprocessing to reduce CPU/RAM usage. Marker itself does not use OpenRouter during parsing; when an OpenRouter key is provided, the app uses the selected image-caption model to describe extracted paper images and adds those descriptions to the searchable paper text. Original images and `.txt` sidecars containing nearby extracted text and captions are stored under `extracted_visuals/<paper>/`.
 
 For difficult scanned or math-heavy PDFs, Marker supports higher-accuracy modes and optional LLM correction, but those require more local resources or API usage and are intentionally not enabled by this integration.
 

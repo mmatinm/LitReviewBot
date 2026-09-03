@@ -116,7 +116,13 @@ def _looks_incomplete(text: str) -> bool:
         return True
     return False
 
-def generate_image_caption(client: OpenAI, vision_model: str, image_bytes: bytes, context: str) -> str:
+def generate_image_caption(
+    client: OpenAI,
+    vision_model: str,
+    image_bytes: bytes,
+    context: str,
+    image_media_type: str = "image/jpeg",
+) -> str:
     """Send image and surrounding text context to Vision Model to generate a caption."""
     base64_image = encode_image(image_bytes)
     try:
@@ -145,7 +151,7 @@ def generate_image_caption(client: OpenAI, vision_model: str, image_bytes: bytes
                                 {
                                     "type": "image_url",
                                     "image_url": {
-                                        "url": f"data:image/jpeg;base64,{base64_image}"
+                                        "url": f"data:{image_media_type};base64,{base64_image}"
                                     }
                                 }
                             ]
@@ -176,7 +182,7 @@ def generate_image_caption(client: OpenAI, vision_model: str, image_bytes: bytes
                                     {
                                         "type": "image_url",
                                         "image_url": {
-                                            "url": f"data:image/jpeg;base64,{base64_image}"
+                                            "url": f"data:{image_media_type};base64,{base64_image}"
                                         }
                                     }
                                 ]

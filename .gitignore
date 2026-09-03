@@ -2,6 +2,7 @@ venv/
 *.pyc
 __pycache__/
 extracted_visuals/
+.litreviewbot_data/
 extracted_texts/
 extracted_texts/zellener_extracted_text.txt
 chunk_previews/

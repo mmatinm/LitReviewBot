@@ -1,16 +1,14 @@
-VISION_MODELS = [
-    "nvidia/nemotron-nano-12b-v2-vl:free",
-    "google/gemma-3-27b-it:free",
-    "google/gemma-3-4b-it:free",
-    "google/lyria-3-pro-preview",
-    "google/gemma-3-12b-it:free",
-    "google/lyria-3-clip-preview",
+TEXT_MODELS = [
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "minimax/minimax-m3:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "google/gemma-4-31b-it:free",
 ]
 
-TEXT_MODELS = [
-    "qwen/qwen3.6-plus",
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "stepfun/step-3.5-flash:free",
+IMAGE_MODELS = [
+    "minimax/minimax-m3:free",
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+    "google/gemma-4-31b-it:free",
 ]
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
