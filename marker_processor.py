@@ -171,6 +171,7 @@ def extract_pdf_data_with_marker(
                 "--output_dir", str(output_dir),
                 "--output_format", "markdown",
                 "--mode", mode,
+                "--paginate_output",
                 "--disable_ocr",
                 "--disable_multiprocessing",
             ]
@@ -220,7 +221,7 @@ def extract_pdf_data_with_marker(
 
             full_paper_text = f"--- START OF PAPER: {filename} ---\n\n{markdown}\n"
             documents_data[filename] = full_paper_text
-            (text_root / f"{source_stem}_processed.txt").write_text(
+            (text_root / f"{source_stem}_processed.md").write_text(
                 full_paper_text,
                 encoding="utf-8",
             )

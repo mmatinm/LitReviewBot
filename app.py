@@ -4,7 +4,13 @@ from types import SimpleNamespace
 from config import IMAGE_MODELS, TEXT_MODELS
 from api_client import get_openrouter_client, call_openrouter
 from marker_processor import extract_pdf_data_with_marker
-from vector_store import initialize_vector_store, retrieve_context, retrieve_docs
+from vector_store import (
+    initialize_vector_store,
+    retrieve_context,
+    retrieve_docs,
+    _format_doc_for_context,
+    _is_reference_query,
+)
 
 
 def _prepare_reusable_uploaded_pdfs(uploaded_pdf_files):
@@ -17,7 +23,7 @@ def _prepare_reusable_uploaded_pdfs(uploaded_pdf_files):
 
 
 def _load_uploaded_text_documents(uploaded_text_files, progress_callback=None):
-    """Load user-provided TXT documents directly into documents_data."""
+    """Load user-provided TXT or Markdown documents directly into documents_data."""
     docs = {}
     total = len(uploaded_text_files)
     for idx, txt_file in enumerate(uploaded_text_files):
@@ -80,10 +86,10 @@ def main():
         
         st.subheader("Document Upload")
         uploaded_documents = st.file_uploader(
-            "Upload documents (.pdf or .txt)",
-            type=["pdf", "txt"],
+            "Upload documents (.pdf, .txt, or .md)",
+            type=["pdf", "txt", "md"],
             accept_multiple_files=True,
-            help="Upload new papers as .pdf. If a paper was already processed before, upload its extracted .txt instead to skip PDF/vision processing.",
+            help="Upload new papers as .pdf, or upload processed .txt/.md files to skip PDF and vision processing.",
         )
 
         st.info("PDFs are parsed with Marker. If Marker fails, processing stops so the error can be debugged directly.")
@@ -109,14 +115,17 @@ def main():
     if process_btn:
         uploaded_documents = uploaded_documents or []
         uploaded_files = [f for f in uploaded_documents if f.name.lower().endswith(".pdf")]
-        uploaded_text_files = [f for f in uploaded_documents if f.name.lower().endswith(".txt")]
+        uploaded_text_files = [
+            f for f in uploaded_documents
+            if f.name.lower().endswith((".txt", ".md"))
+        ]
         reusable_uploaded_files = _prepare_reusable_uploaded_pdfs(uploaded_files) if uploaded_files else []
 
         has_pdf = bool(reusable_uploaded_files)
         has_uploaded_txt = bool(uploaded_text_files)
 
         if not (has_pdf or has_uploaded_txt):
-            st.sidebar.error("Please upload PDFs and/or TXT files.")
+            st.sidebar.error("Please upload PDFs, TXT files, and/or Markdown files.")
         else:
             status_text = st.empty()
             
@@ -142,7 +151,7 @@ def main():
                         extraction_failed = True
 
             if has_uploaded_txt:
-                with st.spinner("Loading uploaded TXT files..."):
+                with st.spinner("Loading uploaded TXT/Markdown files..."):
                     docs_from_uploaded_txt = _load_uploaded_text_documents(
                         uploaded_text_files,
                         progress_callback=update_progress,
@@ -212,12 +221,13 @@ def main():
                 retrieved_docs = retrieve_docs(
                     st.session_state.vector_store,
                     query=user_query,
-                    k=6,
+                    k=10,
                     source_filter=chat_focus_paper,
+                    candidate_k=30,
                 )
-                context = "\n\n".join([d.page_content for d in retrieved_docs])
+                context = "\n\n".join(_format_doc_for_context(d) for d in retrieved_docs)
                 # Keep prompts cost-safe while preserving enough evidence for grounded answers.
-                context = context[:12000]
+                # context = context[:12000]
 
                 st.session_state.last_retrieval_debug = {
                     "query": user_query,
@@ -228,8 +238,11 @@ def main():
                         {
                             "source": (d.metadata or {}).get("source", "unknown"),
                             "chunk_id": (d.metadata or {}).get("chunk_id", "?"),
-                            "char_len": len(d.page_content or ""),
-                            "preview": (d.page_content or "")[:280],
+                            "page": (d.metadata or {}).get("page", ""),
+                            "section": (d.metadata or {}).get("section", ""),
+                            "content_type": (d.metadata or {}).get("content_type", "text"),
+                            "char_len": len((d.metadata or {}).get("raw_text", d.page_content) or ""),
+                            "preview": ((d.metadata or {}).get("raw_text", d.page_content) or "")[:280],
                         }
                         for d in retrieved_docs
                     ],
@@ -237,9 +250,18 @@ def main():
                 
                 scope_hint = f"Retrieval scope is only this paper: {chat_focus_paper}." if chat_focus_paper else "Retrieval scope includes all uploaded papers."
                 prompt = f"""
-                You are a helpful research assistant. Answer the user's question using ONLY the provided context from the research papers.
+                You are an expert academic research assistant. Answer the user's question using ONLY the provided context from the research papers.
                 If the answer isn't in the context, say "I don't know based on the provided papers."
                 {scope_hint}
+                Cite supporting evidence naturally using the paper name, page number, or section when useful.
+                Do not invent page numbers or citations.
+                Give a complete, well-structured answer. Do not stop early, omit requested items,
+                or truncate a list. For reference-list questions, include every reference
+                present in the supplied context and preserve its numbering. Use clear Markdown
+                headings and numbered lists when useful.
+                Return only the final answer for the user. Do not describe your reasoning or
+                retrieval process. Never say "the user is asking", "I need to", "looking at
+                the context", "chunk", "retrieved chunks", "context", "metadata", or "debug".
                 
                 Context:
                 {context}
@@ -253,7 +275,13 @@ def main():
                     thinking = st.empty()
                     thinking.markdown("_Thinking..._")
                     try:
-                        answer = call_openrouter(client, text_model, prompt, max_tokens=900)
+                        answer = call_openrouter(
+                            client,
+                            text_model,
+                            prompt,
+                            temperature=0.25,
+                            max_tokens=6000,
+                        )
                     except Exception as error:
                         answer = f"Unable to answer the question: {error}"
                     if not answer or not answer.strip():
@@ -272,7 +300,9 @@ def main():
                 )
                 for i, item in enumerate(dbg["docs"], start=1):
                     st.markdown(
-                        f"**{i}. {item['source']} | chunk_id={item['chunk_id']} | chars={item['char_len']}**"
+                        f"**{i}. {item['source']} | page={item['page'] or '?'} | "
+                        f"section={item['section'] or '?'} | chunk_id={item['chunk_id']} | "
+                        f"type={item['content_type']} | chars={item['char_len']}**"
                     )
                     st.text(item["preview"])
 

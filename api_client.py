@@ -1,4 +1,5 @@
 import base64
+import re
 from openai import OpenAI
 from config import OPENROUTER_BASE_URL, OPENROUTER_HEADERS
 
@@ -116,6 +117,16 @@ def _looks_incomplete(text: str) -> bool:
         return True
     return False
 
+
+def _coherent_caption(text: str) -> str:
+    """Keep model output as one paragraph so it remains one retrieval unit."""
+    text = (text or "").strip()
+    text = text.replace("\r\n", "\n")
+    text = re.sub(r"(?m)^\s*[-*•]\s+", "", text)
+    text = re.sub(r"(?m)^\s*(?:caption|description)\s*:\s*", "", text, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def generate_image_caption(
     client: OpenAI,
     vision_model: str,
@@ -127,14 +138,15 @@ def generate_image_caption(
     base64_image = encode_image(image_bytes)
     try:
         prompt = f"""
-        You are an expert scientific image transcriber. 
+        You are an expert scientific image transcriber.
         Here is the text found near the image below in a scientific paper:
         ---
         {context}
         ---
-        Look closely at the provided image. Does it correspond to a specific Figure or Table mentioned in the context?
-        If so, name it (e.g., 'Figure 1'). Then, provide a detailed but concise textual caption/description of what the image/table shows, 
-        including any key data points, trends, or variables.
+        Look closely at the provided image. Write one coherent, self-contained paragraph
+        describing what the image or table shows, including its figure/table number when
+        confidently identifiable and the key data, trends, variables, and relationships.
+        Do not use headings, bullets, numbered lists, line breaks, or Markdown.
         """
 
         last_error = None
@@ -197,7 +209,7 @@ def generate_image_caption(
                     if cont_text:
                         text = f"{text}\n{cont_text}".strip()
 
-                return text
+                return _coherent_caption(text)
             except Exception as retry_error:
                 last_error = retry_error
 

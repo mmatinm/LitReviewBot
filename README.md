@@ -98,7 +98,7 @@ LaTeX equations, formatted tables, and extracted images.
    - `python -m streamlit run app.py`
 4. Upload a PDF and click **process Papers**. Marker is selected automatically.
 
-Marker mode uses `fast` mode and disables multiprocessing to reduce CPU/RAM usage. Marker itself does not use OpenRouter during parsing; when an OpenRouter key is provided, the app uses the selected image-caption model to describe extracted paper images and adds those descriptions to the searchable paper text. Original images and `.txt` sidecars containing nearby extracted text and captions are stored under `extracted_visuals/<paper>/`.
+Marker mode uses `fast` mode, paginated Markdown output, and disables multiprocessing to reduce CPU/RAM usage. Pagination markers preserve the source PDF page number for chunk metadata. Marker itself does not use OpenRouter during parsing; when an OpenRouter key is provided, the app uses the selected image-caption model to describe extracted paper images and adds those descriptions to the searchable paper text. Processed paper Markdown is saved under `extracted_texts/<paper>_processed.md`; original images and `.txt` sidecars containing nearby extracted text and captions are stored under `extracted_visuals/<paper>/`.
 
 For difficult scanned or math-heavy PDFs, Marker supports higher-accuracy modes and optional LLM correction, but those require more local resources or API usage and are intentionally not enabled by this integration.
 
