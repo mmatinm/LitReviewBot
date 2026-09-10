@@ -216,3 +216,60 @@ def generate_image_caption(
         return f"[Image transcription failed: {last_error}]"
     except Exception as e:
         return f"[Image transcription failed: {e}]"
+
+
+def condense_query_with_history(
+    client: OpenAI,
+    model: str,
+    chat_history: list,
+    latest_query: str,
+) -> str:
+    """Rewrite a conversational follow-up into a standalone search query using chat history."""
+    if not chat_history or not (latest_query or "").strip():
+        return latest_query
+
+    # Extract up to the last 4 messages (2 conversational turns) to keep condensation fast and focused
+    recent_history = chat_history[-4:]
+    formatted_turns = []
+    for msg in recent_history:
+        role = str(msg.get("role", "user")).capitalize()
+        content = str(msg.get("content", ""))[:400].strip()
+        if content:
+            formatted_turns.append(f"{role}: {content}")
+
+    if not formatted_turns:
+        return latest_query
+
+    history_str = "\n".join(formatted_turns)
+    prompt = f"""Given the following conversation history and a follow-up question from a researcher reading academic papers, rephrase the follow-up question to be a complete, standalone search query.
+Include necessary context such as specific paper names, model names, algorithms, or experimental setups referenced earlier.
+Do NOT answer the question. Do NOT include quotes or prefixes like "Standalone query:". Only return the rephrased search query.
+If the question is already complete and standalone, return it exactly as is.
+
+Conversation History:
+{history_str}
+
+Follow-up Question:
+{latest_query}
+
+Standalone Query:"""
+
+    try:
+        safe_headers = _sanitize_headers_ascii(OPENROUTER_HEADERS)
+        safe_prompt = _normalize_text_quotes(prompt)
+        response = client.chat.completions.create(
+            extra_headers=safe_headers,
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a concise search query reformulation assistant."},
+                {"role": "user", "content": safe_prompt},
+            ],
+            temperature=0.0,
+            max_tokens=90,
+        )
+        rewritten = _extract_message_text(response.choices[0].message.content).strip()
+        rewritten = re.sub(r'^(?:Standalone\s*Query\s*:\s*|Query\s*:\s*)', '', rewritten, flags=re.IGNORECASE).strip().strip('"\'')
+        return rewritten if rewritten else latest_query
+    except Exception:
+        return latest_query
+

@@ -2,7 +2,11 @@ import streamlit as st
 import os
 from types import SimpleNamespace
 from config import IMAGE_MODELS, TEXT_MODELS
-from api_client import get_openrouter_client, call_openrouter
+from api_client import (
+    get_openrouter_client,
+    call_openrouter,
+    condense_query_with_history,
+)
 from marker_processor import extract_pdf_data_with_marker
 from vector_store import (
     initialize_vector_store,
@@ -176,7 +180,14 @@ def main():
     # TAB 1: Chat 
     # ------------------
     with tab1:
-        st.header("Chat with your Papers")
+        chat_header_col1, chat_header_col2 = st.columns([5, 1])
+        with chat_header_col1:
+            st.header("Chat with your Papers")
+        with chat_header_col2:
+            if st.button("🗑️ Clear Chat", help="Reset conversational chat history"):
+                st.session_state.chat_history = []
+                st.session_state.last_retrieval_debug = None
+                st.rerun()
         
         # Streamlit uses SVGs or basic emojis for avatars.
         # This SVG natively replicates the 'default user icon' Streamlit theme (rounded square) but draws a boy figure instead.
@@ -213,14 +224,27 @@ def main():
             elif st.session_state.vector_store is None:
                 st.warning("Please upload and process PDFs first.")
             else:
-                # Add human message 
+                client = get_openrouter_client(api_key)
+
+                # Step 1: Condense follow-up question using conversation history for accurate retrieval
+                search_query = user_query
+                if st.session_state.chat_history:
+                    with st.spinner("Refining search query from chat history..."):
+                        search_query = condense_query_with_history(
+                            client=client,
+                            model=text_model,
+                            chat_history=st.session_state.chat_history,
+                            latest_query=user_query,
+                        )
+
+                # Add user message to display and history
                 st.session_state.chat_history.append({"role": "user", "content": user_query})
                 st.chat_message("user", avatar=boy_avatar_svg).write(user_query)
                 
-                # Retrieval (references-aware + optional paper filter)
+                # Step 2: Retrieval (references-aware + optional paper filter) using reformulated search_query
                 retrieved_docs = retrieve_docs(
                     st.session_state.vector_store,
-                    query=user_query,
+                    query=search_query,
                     k=10,
                     source_filter=chat_focus_paper,
                     candidate_k=30,
@@ -231,6 +255,7 @@ def main():
 
                 st.session_state.last_retrieval_debug = {
                     "query": user_query,
+                    "search_query": search_query,
                     "source_filter": chat_focus_paper,
                     "doc_count": len(retrieved_docs),
                     "context_chars": len(context),
@@ -247,10 +272,23 @@ def main():
                         for d in retrieved_docs
                     ],
                 }
+
+                # Step 3: Format sliding window of conversation history (up to last 3 prior turns / 6 messages)
+                past_turns = st.session_state.chat_history[:-1][-6:]
+                history_section = ""
+                if past_turns:
+                    history_lines = []
+                    for m in past_turns:
+                        sender = "User" if m["role"] == "user" else "Assistant"
+                        content = m["content"].strip()
+                        if len(content) > 1200:
+                            content = content[:1200] + "..."
+                        history_lines.append(f"{sender}: {content}")
+                    history_section = "Previous Conversation History:\n" + "\n".join(history_lines) + "\n\n"
                 
                 scope_hint = f"Retrieval scope is only this paper: {chat_focus_paper}." if chat_focus_paper else "Retrieval scope includes all uploaded papers."
                 prompt = f"""
-                You are an expert academic research assistant. Answer the user's question using ONLY the provided context from the research papers.
+                You are an expert academic research assistant. Answer the user's question using ONLY the provided context from the research papers and the ongoing conversation history.
                 If the answer isn't in the context, say "I don't know based on the provided papers."
                 {scope_hint}
                 Cite supporting evidence naturally using the paper name, page number, or section when useful.
@@ -263,14 +301,13 @@ def main():
                 retrieval process. Never say "the user is asking", "I need to", "looking at
                 the context", "chunk", "retrieved chunks", "context", "metadata", or "debug".
                 
-                Context:
+                {history_section}Context:
                 {context}
                 
                 Question:
                 {user_query}
                 """
                 
-                client = get_openrouter_client(api_key)
                 with st.chat_message("assistant"):
                     thinking = st.empty()
                     thinking.markdown("_Thinking..._")
@@ -294,8 +331,11 @@ def main():
         if show_retrieval_debug and st.session_state.last_retrieval_debug:
             dbg = st.session_state.last_retrieval_debug
             with st.expander("Retrieval Debug", expanded=True):
+                query_caption = f"Query: {dbg['query']}"
+                if dbg.get("search_query") and dbg["search_query"] != dbg["query"]:
+                    query_caption += f" | Rewritten for retrieval: '{dbg['search_query']}'"
                 st.caption(
-                    f"Query: {dbg['query']} | Scope: {dbg['source_filter'] or 'All papers'} | "
+                    f"{query_caption} | Scope: {dbg['source_filter'] or 'All papers'} | "
                     f"Retrieved: {dbg['doc_count']} chunks | Context chars sent: {dbg['context_chars']}"
                 )
                 for i, item in enumerate(dbg["docs"], start=1):
