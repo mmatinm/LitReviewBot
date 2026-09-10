@@ -6,8 +6,12 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from api_client import generate_image_caption, get_llm_client, get_openrouter_client
-from config import IMAGE_MODELS, OPENROUTER_BASE_URL
+try:
+    from src.api_client import generate_image_caption, get_llm_client, get_openrouter_client
+    from src.config import IMAGE_MODELS, OPENROUTER_BASE_URL
+except ImportError:
+    from api_client import generate_image_caption, get_llm_client, get_openrouter_client
+    from config import IMAGE_MODELS, OPENROUTER_BASE_URL
 
 
 def _safe_stem(name: str) -> str:

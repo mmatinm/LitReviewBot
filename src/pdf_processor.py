@@ -4,8 +4,10 @@ import re
 from statistics import median
 from PIL import Image
 import io
-from openai import OpenAI
-from api_client import generate_image_caption
+try:
+    from src.api_client import generate_image_caption
+except ImportError:
+    from api_client import generate_image_caption
 
 def _build_line_text_from_spans(spans: list) -> str:
     """Reconstruct a line from spans while preserving super/subscript hints."""

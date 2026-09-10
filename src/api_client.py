@@ -10,7 +10,10 @@ from openai import (
     OpenAI,
     RateLimitError,
 )
-from config import OPENROUTER_BASE_URL, OPENROUTER_HEADERS
+try:
+    from src.config import OPENROUTER_BASE_URL, OPENROUTER_HEADERS
+except ImportError:
+    from config import OPENROUTER_BASE_URL, OPENROUTER_HEADERS
 
 
 def _sanitize_headers_ascii(headers: dict) -> dict:

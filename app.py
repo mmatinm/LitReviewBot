@@ -1,15 +1,18 @@
-import streamlit as st
+import io
 import os
+import zipfile
 from types import SimpleNamespace
-from config import IMAGE_MODELS, PROVIDERS, TEXT_MODELS
-from api_client import (
+import streamlit as st
+
+from src.config import IMAGE_MODELS, PROVIDERS, TEXT_MODELS
+from src.api_client import (
     get_llm_client,
     get_openrouter_client,
     call_openrouter,
     condense_query_with_history,
 )
-from marker_processor import extract_pdf_data_with_marker
-from vector_store import (
+from src.marker_processor import extract_pdf_data_with_marker
+from src.vector_store import (
     initialize_vector_store,
     retrieve_context,
     retrieve_docs,
@@ -75,7 +78,7 @@ def _is_call_error(res: str) -> bool:
 
 
 # Configuration
-st.set_page_config(page_title="Literature Review Bot", page_icon="📚", layout="wide")
+st.set_page_config(page_title="LitReviewBot", page_icon="📚", layout="wide")
 
 CUSTOM_CSS = """
 <style>
@@ -537,7 +540,7 @@ def main():
                     </defs>
                 </svg>
                 <div>
-                    <div style="font-weight: 700; font-size: 0.96rem; letter-spacing: -0.02em; color: #F8FAFC;">ScholarLens</div>
+                    <div style="font-weight: 700; font-size: 0.96rem; letter-spacing: -0.02em; color: #F8FAFC;">LitReviewBot</div>
                     <div style="font-size: 0.70rem; color: #60A5FA; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em;">Research Workbench</div>
                 </div>
             </div>
@@ -594,9 +597,41 @@ def main():
         process_btn = st.button("⚡ Index Documents", type="primary", use_container_width=True)
 
         if st.session_state.documents_data:
-            with st.expander(f"📚 Indexed Papers ({len(st.session_state.documents_data)})", expanded=False):
-                for p_name in st.session_state.documents_data.keys():
-                    st.caption(f"✓ `{p_name}`")
+            with st.expander(f"📚 Indexed Papers ({len(st.session_state.documents_data)})", expanded=True):
+                st.caption("💡 Download extracted Markdown (.md) to re-upload directly next time and skip PDF parsing!")
+                
+                # Bulk download button if more than 1 paper
+                if len(st.session_state.documents_data) > 1:
+                    zip_buffer = io.BytesIO()
+                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                        for p_name, p_text in st.session_state.documents_data.items():
+                            clean_stem = os.path.splitext(p_name)[0]
+                            zip_file.writestr(f"{clean_stem}_extracted.md", p_text)
+                    zip_buffer.seek(0)
+                    st.download_button(
+                        label="📦 Download All as ZIP",
+                        data=zip_buffer,
+                        file_name="extracted_papers_md.zip",
+                        mime="application/zip",
+                        use_container_width=True,
+                    )
+                    st.markdown("---")
+
+                # Individual paper downloads
+                for p_name, p_text in st.session_state.documents_data.items():
+                    clean_stem = os.path.splitext(p_name)[0]
+                    col_p1, col_p2 = st.columns([3, 1])
+                    with col_p1:
+                        st.caption(f"✓ `{p_name}`")
+                    with col_p2:
+                        st.download_button(
+                            label="📥 .md",
+                            data=p_text,
+                            file_name=f"{clean_stem}_extracted.md",
+                            mime="text/markdown",
+                            key=f"dl_{p_name}",
+                            help=f"Download {p_name} as Markdown",
+                        )
         
     # Document ingestion and indexing
     if process_btn:
@@ -683,11 +718,11 @@ def main():
         <div class="hero-wrapper">
             <div class="hero-top-row">
                 <div class="hero-badge-group">
-                    <span class="hero-badge">ScholarLens · Multi-Paper Research Workbench</span>
+                    <span class="hero-badge">LitReviewBot · Multi-Paper Research Workbench</span>
                     <span class="pulse-indicator"><span class="pulse-dot"></span>Core Engine Online</span>
                 </div>
             </div>
-            <h1 class="hero-title-text">ScholarLens AI</h1>
+            <h1 class="hero-title-text">LitReviewBot</h1>
             <p class="hero-subtitle-text">
                 Autonomous academic literature synthesis, cross-study comparative matrices, and grounded conversational inquiry across full-text papers.
             </p>
