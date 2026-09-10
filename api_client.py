@@ -28,12 +28,16 @@ def _normalize_text_quotes(text: str) -> str:
         .replace("\u2014", "-")
     )
 
-def get_openrouter_client(api_key: str) -> OpenAI:
-    """Initializes the OpenAI client pointing to OpenRouter."""
+def get_llm_client(api_key: str, base_url: str = OPENROUTER_BASE_URL) -> OpenAI:
+    """Initializes the OpenAI client pointing to any supported LLM provider."""
     return OpenAI(
-        base_url=OPENROUTER_BASE_URL,
+        base_url=base_url,
         api_key=api_key,
     )
+
+def get_openrouter_client(api_key: str) -> OpenAI:
+    """Initializes the OpenAI client pointing to OpenRouter."""
+    return get_llm_client(api_key, OPENROUTER_BASE_URL)
 
 def call_openrouter(
     client: OpenAI,
@@ -42,42 +46,49 @@ def call_openrouter(
     system_prompt: str = "You vary your tone based on instructions.",
     temperature: float = 0.5,
     max_tokens: int = 1200,
+    extra_headers: dict | None = None,
 ) -> str:
-    """Standard call to a Text Model on OpenRouter."""
+    """Standard call to a Text Model on OpenRouter, AvalAI, or Hormouz AI."""
+    headers_to_send = extra_headers if extra_headers is not None else OPENROUTER_HEADERS
+    safe_headers = _sanitize_headers_ascii(headers_to_send) if headers_to_send else None
     try:
-        safe_headers = _sanitize_headers_ascii(OPENROUTER_HEADERS)
         safe_system_prompt = _normalize_text_quotes(system_prompt)
         safe_prompt = _normalize_text_quotes(prompt)
 
-        response = client.chat.completions.create(
-            extra_headers=safe_headers,
-            model=model,
-            messages=[
+        req_kwargs = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": safe_system_prompt},
                 {"role": "user", "content": safe_prompt}
             ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        if safe_headers:
+            req_kwargs["extra_headers"] = safe_headers
+
+        response = client.chat.completions.create(**req_kwargs)
         return response.choices[0].message.content
     except UnicodeEncodeError:
         # Hard fallback for environments/transports that still enforce ASCII.
         try:
-            safe_headers = _sanitize_headers_ascii(OPENROUTER_HEADERS)
             ascii_system_prompt = _normalize_text_quotes(system_prompt).encode("ascii", "ignore").decode("ascii")
             ascii_prompt = _normalize_text_quotes(prompt).encode("ascii", "ignore").decode("ascii")
             ascii_model = str(model).encode("ascii", "ignore").decode("ascii") or str(model)
 
-            response = client.chat.completions.create(
-                extra_headers=safe_headers,
-                model=ascii_model,
-                messages=[
+            req_kwargs = {
+                "model": ascii_model,
+                "messages": [
                     {"role": "system", "content": ascii_system_prompt},
                     {"role": "user", "content": ascii_prompt}
                 ],
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            if safe_headers:
+                req_kwargs["extra_headers"] = safe_headers
+
+            response = client.chat.completions.create(**req_kwargs)
             return response.choices[0].message.content
         except Exception as e:
             return f"Error calling Main Text Model: {e}"
@@ -133,8 +144,11 @@ def generate_image_caption(
     image_bytes: bytes,
     context: str,
     image_media_type: str = "image/jpeg",
+    extra_headers: dict | None = None,
 ) -> str:
     """Send image and surrounding text context to Vision Model to generate a caption."""
+    headers_to_send = extra_headers if extra_headers is not None else OPENROUTER_HEADERS
+    safe_headers = _sanitize_headers_ascii(headers_to_send) if headers_to_send else None
     base64_image = encode_image(image_bytes)
     try:
         prompt = f"""
@@ -152,10 +166,9 @@ def generate_image_caption(
         last_error = None
         for _ in range(2):
             try:
-                response = client.chat.completions.create(
-                    extra_headers=OPENROUTER_HEADERS,
-                    model=vision_model,
-                    messages=[
+                req_kwargs = {
+                    "model": vision_model,
+                    "messages": [
                         {
                             "role": "user",
                             "content": [
@@ -169,9 +182,13 @@ def generate_image_caption(
                             ]
                         }
                     ],
-                    temperature=0.3,
-                    max_tokens=1000
-                )
+                    "temperature": 0.3,
+                    "max_tokens": 1000,
+                }
+                if safe_headers:
+                    req_kwargs["extra_headers"] = safe_headers
+
+                response = client.chat.completions.create(**req_kwargs)
 
                 choice = response.choices[0]
                 text = _extract_message_text(choice.message.content)
@@ -183,10 +200,9 @@ def generate_image_caption(
                 finish_reason = getattr(choice, "finish_reason", None)
                 if finish_reason == "length" or _looks_incomplete(text):
                     # Ask the model to continue so outputs are not cut mid-sentence.
-                    continuation = client.chat.completions.create(
-                        extra_headers=OPENROUTER_HEADERS,
-                        model=vision_model,
-                        messages=[
+                    cont_kwargs = {
+                        "model": vision_model,
+                        "messages": [
                             {
                                 "role": "user",
                                 "content": [
@@ -202,9 +218,13 @@ def generate_image_caption(
                             {"role": "assistant", "content": text},
                             {"role": "user", "content": "Continue from exactly where you stopped. Do not repeat earlier lines."}
                         ],
-                        temperature=0.2,
-                        max_tokens=500
-                    )
+                        "temperature": 0.2,
+                        "max_tokens": 500,
+                    }
+                    if safe_headers:
+                        cont_kwargs["extra_headers"] = safe_headers
+
+                    continuation = client.chat.completions.create(**cont_kwargs)
                     cont_text = _extract_message_text(continuation.choices[0].message.content)
                     if cont_text:
                         text = f"{text}\n{cont_text}".strip()
@@ -223,6 +243,7 @@ def condense_query_with_history(
     model: str,
     chat_history: list,
     latest_query: str,
+    extra_headers: dict | None = None,
 ) -> str:
     """Rewrite a conversational follow-up into a standalone search query using chat history."""
     if not chat_history or not (latest_query or "").strip():
@@ -255,18 +276,22 @@ Follow-up Question:
 Standalone Query:"""
 
     try:
-        safe_headers = _sanitize_headers_ascii(OPENROUTER_HEADERS)
+        headers_to_send = extra_headers if extra_headers is not None else OPENROUTER_HEADERS
+        safe_headers = _sanitize_headers_ascii(headers_to_send) if headers_to_send else None
         safe_prompt = _normalize_text_quotes(prompt)
-        response = client.chat.completions.create(
-            extra_headers=safe_headers,
-            model=model,
-            messages=[
+        req_kwargs = {
+            "model": model,
+            "messages": [
                 {"role": "system", "content": "You are a concise search query reformulation assistant."},
                 {"role": "user", "content": safe_prompt},
             ],
-            temperature=0.0,
-            max_tokens=90,
-        )
+            "temperature": 0.0,
+            "max_tokens": 90,
+        }
+        if safe_headers:
+            req_kwargs["extra_headers"] = safe_headers
+
+        response = client.chat.completions.create(**req_kwargs)
         rewritten = _extract_message_text(response.choices[0].message.content).strip()
         rewritten = re.sub(r'^(?:Standalone\s*Query\s*:\s*|Query\s*:\s*)', '', rewritten, flags=re.IGNORECASE).strip().strip('"\'')
         return rewritten if rewritten else latest_query

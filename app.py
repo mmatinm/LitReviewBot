@@ -1,8 +1,9 @@
 import streamlit as st
 import os
 from types import SimpleNamespace
-from config import IMAGE_MODELS, TEXT_MODELS
+from config import IMAGE_MODELS, PROVIDERS, TEXT_MODELS
 from api_client import (
+    get_llm_client,
     get_openrouter_client,
     call_openrouter,
     condense_query_with_history,
@@ -66,27 +67,38 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuration")
 
-        api_key = st.text_input("OpenRouter API Key", type="password")
+        provider_name = st.selectbox(
+            "LLM Provider",
+            options=list(PROVIDERS.keys()),
+            index=0,
+            help="Select your LLM service provider.",
+        )
+        provider_config = PROVIDERS[provider_name]
+
+        api_key = st.text_input(f"{provider_name} API Key", type="password")
         if not api_key:
-            st.warning("Please enter your OpenRouter API Key to proceed.")
-            st.markdown("[Get one here](https://openrouter.ai/keys)")
+            st.warning(f"Please enter your {provider_name} API Key to proceed.")
+            if provider_config.get("key_url"):
+                st.markdown(f"[Get one here]({provider_config['key_url']})")
         
         st.subheader("Model Selection")
         text_model_input = st.selectbox(
             "Main Text Model (For Q&A/Reviews)",
-            options=TEXT_MODELS,
+            options=provider_config.get("text_models", []),
             index=0,
-            help="Select a text-capable model or type a valid OpenRouter Text model ID."
+            help=f"Select a text-capable model or type a valid {provider_name} model ID.",
         )
         custom_text = st.text_input("Or type custom Text Model ID:")
         text_model = custom_text if custom_text else text_model_input
 
-        image_model = st.selectbox(
+        image_model_input = st.selectbox(
             "Image Model (For Captions)",
-            options=IMAGE_MODELS,
+            options=provider_config.get("image_models", []),
             index=0,
-            help="Select the OpenRouter vision-capable model used to caption extracted images.",
+            help=f"Select the {provider_name} vision-capable model used to caption extracted images.",
         )
+        custom_image = st.text_input("Or type custom Image Model ID:")
+        image_model = custom_image if custom_image else image_model_input
         
         st.subheader("Document Upload")
         uploaded_documents = st.file_uploader(
@@ -149,6 +161,8 @@ def main():
                             mode="fast",
                             api_key=api_key,
                             image_model=image_model,
+                            base_url=provider_config["base_url"],
+                            extra_headers=provider_config.get("headers"),
                         )
                     except Exception as e:
                         st.sidebar.error(f"Marker extraction failed: {e}")
@@ -224,7 +238,8 @@ def main():
             elif st.session_state.vector_store is None:
                 st.warning("Please upload and process PDFs first.")
             else:
-                client = get_openrouter_client(api_key)
+                client = get_llm_client(api_key, base_url=provider_config["base_url"])
+                extra_headers = provider_config.get("headers")
 
                 # Step 1: Condense follow-up question using conversation history for accurate retrieval
                 search_query = user_query
@@ -235,6 +250,7 @@ def main():
                             model=text_model,
                             chat_history=st.session_state.chat_history,
                             latest_query=user_query,
+                            extra_headers=extra_headers,
                         )
 
                 # Add user message to display and history
@@ -318,6 +334,7 @@ def main():
                             prompt,
                             temperature=0.25,
                             max_tokens=6000,
+                            extra_headers=extra_headers,
                         )
                     except Exception as error:
                         answer = f"Unable to answer the question: {error}"
@@ -372,9 +389,17 @@ def main():
                 Paper Text:
                 {truncated_text}
                 """
-                client = get_openrouter_client(api_key)
+                client = get_llm_client(api_key, base_url=provider_config["base_url"])
+                extra_headers = provider_config.get("headers")
                 with st.spinner(f"Summarizing {selected_paper}..."):
-                    summary = call_openrouter(client, text_model, prompt, temperature=0.3, max_tokens=1800)
+                    summary = call_openrouter(
+                        client,
+                        text_model,
+                        prompt,
+                        temperature=0.3,
+                        max_tokens=1800,
+                        extra_headers=extra_headers,
+                    )
                     st.session_state.summaries[selected_paper] = summary
                     st.markdown(summary)
             elif selected_paper in st.session_state.summaries:
@@ -397,7 +422,8 @@ def main():
             elif not st.session_state.documents_data:
                 st.error("Please upload and process papers first.")
             else:
-                client = get_openrouter_client(api_key)
+                client = get_llm_client(api_key, base_url=provider_config["base_url"])
+                extra_headers = provider_config.get("headers")
                 
                 # Fetching broad themes by searching keywords representing distinct sections
                 search_terms = "objective methodology findings conclusion overview summary figures tables literature"
@@ -428,7 +454,14 @@ def main():
                 """
                 
                 with st.spinner(f"Synthesizing {review_type} Literature Review..."):
-                    lit_review = call_openrouter(client, text_model, prompt, temperature=0.4, max_tokens=2200)
+                    lit_review = call_openrouter(
+                        client,
+                        text_model,
+                        prompt,
+                        temperature=0.4,
+                        max_tokens=2200,
+                        extra_headers=extra_headers,
+                    )
                     st.markdown(lit_review)
 
 if __name__ == "__main__":
