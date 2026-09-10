@@ -15,6 +15,8 @@ from vector_store import (
     retrieve_docs,
     _format_doc_for_context,
     _is_reference_query,
+    extract_global_paper_briefs,
+    retrieve_balanced_review_context,
 )
 
 
@@ -124,6 +126,8 @@ def main():
         st.session_state.summaries = {}
     if "last_retrieval_debug" not in st.session_state:
         st.session_state.last_retrieval_debug = None
+    if "literature_review" not in st.session_state:
+        st.session_state.literature_review = None
         
     # ------------------
     # Processing Phase
@@ -375,16 +379,16 @@ def main():
             if st.button("Generate Summary"):
                 paper_text = st.session_state.documents_data[selected_paper]
                 
-                # Simple Map-Reduce style summarization approximation to handle long documents cleanly
-                truncated_text = paper_text[:180000]
+                # Slicing up to 250,000 characters (~60,000 tokens), safe for all modern models
+                truncated_text = paper_text[:250000]
                 
                 prompt = f"""
-                You are an expert researcher. Please provide a structured summary of the following research paper.
+                You are an expert researcher. Please provide a detailed, structured academic summary of the following research paper.
                 Include:
-                - Core Objective
-                - Methodology
-                - Key Findings (Include data from figures/tables if present in text)
-                - Conclusion
+                - Core Objective & Problem Formulation
+                - Methodology & System Architecture
+                - Key Empirical Findings & Metrics (Include specific data from figures/tables if present in text)
+                - Critical Limitations & Conclusion
                 
                 Paper Text:
                 {truncated_text}
@@ -397,7 +401,7 @@ def main():
                         text_model,
                         prompt,
                         temperature=0.3,
-                        max_tokens=1800,
+                        max_tokens=6000,
                         extra_headers=extra_headers,
                     )
                     st.session_state.summaries[selected_paper] = summary
@@ -413,56 +417,269 @@ def main():
     with tab3:
         st.header("Literature Review Builder")
         
-        review_type = st.radio("Review Detail Level", ["Short", "Detailed/Long"])
+        review_type = st.radio("Review Detail Level", ["Detailed/Long", "Short"], index=0)
         include_visuals = st.checkbox("Include references to graphs/tables", value=True)
         
-        if st.button("Generate Literature Review"):
+        sec_max_tokens = 6000 if review_type == "Detailed/Long" else 3000
+        sec_temp = 0.35
+
+        generate_btn = st.button("Generate Literature Review", type="primary")
+        
+        if generate_btn:
             if not api_key:
-                st.error("Please configure your API Key.")
+                st.error(f"Please configure your {provider_name} API Key.")
             elif not st.session_state.documents_data:
                 st.error("Please upload and process papers first.")
+            elif st.session_state.vector_store is None:
+                st.warning("Please upload and process papers to build the vector store first.")
             else:
                 client = get_llm_client(api_key, base_url=provider_config["base_url"])
                 extra_headers = provider_config.get("headers")
-                
-                # Fetching broad themes by searching keywords representing distinct sections
-                search_terms = "objective methodology findings conclusion overview summary figures tables literature"
-                context = retrieve_context(st.session_state.vector_store, query=search_terms, k=20, source_filter=None)
-                
-                visuals_prompt = "Make sure to explicitly mention insights derived from tables and graphs." if include_visuals else "Do not focus heavily on specific tables or graphs."
-                
-                prompt = f"""
-                You are a senior academic researcher writing a cross-study Literature Review based on the following extracted chunks from multiple papers.
-                Format the output as a cohesive {review_type.lower()} literature review. 
-                {visuals_prompt}
+                paper_names = list(st.session_state.documents_data.keys())
 
-                CRITICAL WRITING CONSTRAINTS:
-                - Write as a scientific story, not a list of isolated summaries.
-                - Every paragraph must have one clear message/claim.
-                - Every paragraph's claim must be explicitly supported by one or more papers from the provided context.
-                - Synthesize across studies (agreements, tensions, and gaps), not just restate them.
-                - Keep a professional academic tone and use precise language.
-                
-                Structure it with:
-                1. Introduction / Thematic Overview
-                2. Comparing Methodologies
-                3. Synthesis of Results
-                4. Conclusion
-                
-                Extracted Data Context:
-                {context}
+                status = st.status("🔬 Synthesizing Literature Review...", expanded=True)
+
+                # Pre-computation: Global Paper Briefs (provides 10,000-ft view of all papers to every section)
+                status.write("📋 Extracting global paper profiles across all uploaded studies...")
+                global_briefs = extract_global_paper_briefs(st.session_state.documents_data, max_chars_per_paper=3000)
+
+                # =========================================================================
+                # SECTION 1: Introduction & Thematic Landscape
+                # =========================================================================
+                status.write("📖 Stage 1/4: Retrieving evidence & synthesizing Thematic Landscape...")
+                sec1_query = "research background motivation core problem objective research questions theoretical framework thematic overview scope"
+                sec1_context = retrieve_balanced_review_context(
+                    st.session_state.vector_store,
+                    paper_names=paper_names,
+                    query=sec1_query,
+                    target_k=36,
+                    max_chars=250000,
+                    prioritize_visuals=include_visuals,
+                )
+
+                sec1_prompt = f"""
+                You are a senior academic researcher writing Section 1 of a publication-grade cross-study Literature Review synthesizing {len(paper_names)} papers: {", ".join(paper_names)}.
+
+                SECTION TO WRITE:
+                ## 1. Thematic Landscape & Problem Formulation
+
+                OBJECTIVES:
+                - Synthesize the overarching research domain, historical background, and motivation shared across these studies.
+                - Formulate the core research questions and challenges that the literature attempts to resolve.
+                - Cluster the papers thematically: what are the schools of thought or paradigms represented?
+                - Contrast the foundational goals and scope of each paper without writing disjointed serial summaries.
+                - Set an authoritative academic tone and establish common terminology.
+
+                GLOBAL PAPER PROFILES:
+                {global_briefs}
+
+                TARGETED EXTRACTED EVIDENCE:
+                {sec1_context}
+
+                CRITICAL WRITING INSTRUCTIONS:
+                - Write a rich, coherent narrative synthesis. Every paragraph must advance a clear synthetic claim supported by citations.
+                - Cite papers naturally using paper names (e.g., `[Chen et al., 2025]` or `[Filename]`).
+                - Detail level: {review_type.lower()}. Do not truncate or omit any paper.
+                - Output ONLY Section 1 in Markdown, starting with `## 1. Thematic Landscape & Problem Formulation`.
                 """
-                
-                with st.spinner(f"Synthesizing {review_type} Literature Review..."):
-                    lit_review = call_openrouter(
-                        client,
-                        text_model,
-                        prompt,
-                        temperature=0.4,
-                        max_tokens=2200,
-                        extra_headers=extra_headers,
-                    )
-                    st.markdown(lit_review)
+
+                sec1_text = call_openrouter(
+                    client,
+                    text_model,
+                    sec1_prompt,
+                    temperature=sec_temp,
+                    max_tokens=sec_max_tokens,
+                    extra_headers=extra_headers,
+                )
+
+                # =========================================================================
+                # SECTION 2: Comparative Methodologies & Architectural Paradigms
+                # =========================================================================
+                status.write("⚙️ Stage 2/4: Retrieving evidence & comparing Methodologies & Architectures...")
+                sec2_query = "methodology system architecture algorithms experimental design datasets benchmarks baseline implementation pipeline"
+                sec2_context = retrieve_balanced_review_context(
+                    st.session_state.vector_store,
+                    paper_names=paper_names,
+                    query=sec2_query,
+                    target_k=36,
+                    max_chars=250000,
+                    prioritize_visuals=include_visuals,
+                )
+
+                sec2_prompt = f"""
+                You are a senior academic researcher writing Section 2 of a publication-grade cross-study Literature Review synthesizing {len(paper_names)} papers: {", ".join(paper_names)}.
+                This section builds directly upon Section 1. Do NOT repeat general background or re-introduce the papers. Focus directly on technical and methodological comparison.
+
+                SECTION TO WRITE:
+                ## 2. Comparative Analysis of Methodologies & Architectural Paradigms
+
+                OBJECTIVES:
+                - Thoroughly compare the technical architectures, models, algorithmic frameworks, pipelines, and reasoning/agentic mechanisms across all studies.
+                - Compare datasets, training paradigms, evaluation protocols, and baselines used by each study.
+                - Analyze design assumptions, trade-offs, and computational complexity.
+                - MANDATORY: Include a detailed, well-formatted Markdown Comparison Table comparing ALL papers:
+                  | Paper | Core Architecture / Method | Key Technical Innovations | Datasets & Benchmarks | Primary Assumptions & Baselines |
+                - Accompany the table with in-depth analytical paragraphs synthesizing why authors chose differing designs and where methodological paradigms diverge.
+
+                GLOBAL PAPER PROFILES:
+                {global_briefs}
+
+                TARGETED EXTRACTED EVIDENCE:
+                {sec2_context}
+
+                PREVIOUS SECTION CONTEXT (FOR CONTINUITY):
+                {sec1_text[:2000]}...
+
+                CRITICAL WRITING INSTRUCTIONS:
+                - Synthesize across studies (e.g., compare multi-agent consensus vs single-agent self-debugging, parameter size vs prompt optimization).
+                - Cite papers explicitly. Ensure the Markdown table is complete and includes all papers.
+                - Output ONLY Section 2 in Markdown, starting with `## 2. Comparative Analysis of Methodologies & Architectural Paradigms`.
+                """
+
+                sec2_text = call_openrouter(
+                    client,
+                    text_model,
+                    sec2_prompt,
+                    temperature=sec_temp,
+                    max_tokens=sec_max_tokens,
+                    extra_headers=extra_headers,
+                )
+
+                # =========================================================================
+                # SECTION 3: Empirical Synthesis & Quantitative Benchmarks
+                # =========================================================================
+                status.write("📊 Stage 3/4: Retrieving evidence & synthesizing Quantitative Benchmarks & Results...")
+                sec3_query = "experimental results empirical findings evaluation metrics performance benchmarks comparison tables figures data trade-offs ablation"
+                sec3_context = retrieve_balanced_review_context(
+                    st.session_state.vector_store,
+                    paper_names=paper_names,
+                    query=sec3_query,
+                    target_k=38,
+                    max_chars=250000,
+                    prioritize_visuals=include_visuals,
+                )
+
+                sec3_prompt = f"""
+                You are a senior academic researcher writing Section 3 of a publication-grade cross-study Literature Review synthesizing {len(paper_names)} papers: {", ".join(paper_names)}.
+                This section synthesizes the empirical evidence, quantitative metrics, and benchmark results supporting the claims.
+
+                SECTION TO WRITE:
+                ## 3. Empirical Synthesis & Quantitative Benchmarks
+
+                OBJECTIVES:
+                - Synthesize experimental findings, benchmark performances, and quantitative metrics across all studies.
+                - Report exact numbers, percentages, ablation results, and trends extracted from text, tables, and figures.
+                - Compare performance trade-offs (e.g., accuracy vs latency, duplicate rate vs coverage, parameter scale vs reasoning depth).
+                - MANDATORY: Include a comprehensive Markdown Performance Matrix Table:
+                  | Paper | Evaluated Models / Configurations | Key Benchmarks & Tasks | Reported Metrics & Results | Observed Trade-offs / Failure Modes |
+                - Accompany the table with rigorous analytical commentary on why certain models or methods prevailed.
+
+                GLOBAL PAPER PROFILES:
+                {global_briefs}
+
+                TARGETED EXTRACTED EVIDENCE:
+                {sec3_context}
+
+                CRITICAL WRITING INSTRUCTIONS:
+                - Use precise quantitative figures and statistics wherever present in the extracted evidence.
+                - Connect empirical results directly back to the architectural choices analyzed in Section 2.
+                - Output ONLY Section 3 in Markdown, starting with `## 3. Empirical Synthesis & Quantitative Benchmarks`.
+                """
+
+                sec3_text = call_openrouter(
+                    client,
+                    text_model,
+                    sec3_prompt,
+                    temperature=sec_temp,
+                    max_tokens=sec_max_tokens,
+                    extra_headers=extra_headers,
+                )
+
+                # =========================================================================
+                # SECTION 4: Critical Discussion, Research Gaps & Future Directions
+                # =========================================================================
+                status.write("🔭 Stage 4/4: Retrieving evidence & synthesizing Research Gaps & Future Directions...")
+                sec4_query = "conclusions critical discussion limitations open challenges gaps tensions future research directions recommendations"
+                sec4_context = retrieve_balanced_review_context(
+                    st.session_state.vector_store,
+                    paper_names=paper_names,
+                    query=sec4_query,
+                    target_k=36,
+                    max_chars=250000,
+                    prioritize_visuals=include_visuals,
+                )
+
+                sec4_prompt = f"""
+                You are a senior academic researcher writing the concluding Section 4 of a publication-grade cross-study Literature Review synthesizing {len(paper_names)} papers: {", ".join(paper_names)}.
+                This section provides critical evaluation, synthesizes consensus versus contradictions, and provides a forward-looking research agenda.
+
+                SECTION TO WRITE:
+                ## 4. Critical Discussion, Unresolved Research Gaps & Future Directions
+
+                MANDATORY SUBSECTIONS REQUIRED:
+                ### 4.1 Cross-Study Agreements, Tensions & Contradictions
+                - Where do the findings across these papers reinforce each other?
+                - Where do their conclusions, empirical claims, or theoretical assumptions clash or contradict?
+
+                ### 4.2 Critical Methodological, Computational & Dataset Limitations
+                - What common limitations, evaluation blind spots, or compute/prompt constraints characterize the current state of the art?
+
+                ### 4.3 Unresolved Research Gaps in the Literature
+                - Identify and analyze at least 3-4 concrete, substantive research gaps that none of the reviewed papers have adequately resolved.
+
+                ### 4.4 Promising Directions & Open Problems for Future Research
+                - Provide concrete, actionable roadmaps and hypotheses for future researchers seeking to advance the field beyond these works.
+
+                GLOBAL PAPER PROFILES:
+                {global_briefs}
+
+                TARGETED EXTRACTED EVIDENCE:
+                {sec4_context}
+
+                CRITICAL WRITING INSTRUCTIONS:
+                - Be rigorous, analytical, and visionary. Avoid generic platitudes; tie research gaps to specific technical problems identified in the papers.
+                - Ensure the "Research Gaps" and "Future Research" subsections are rich, detailed, and substantive.
+                - Output ONLY Section 4 in Markdown, starting with `## 4. Critical Discussion, Unresolved Research Gaps & Future Directions`.
+                """
+
+                sec4_text = call_openrouter(
+                    client,
+                    text_model,
+                    sec4_prompt,
+                    temperature=sec_temp,
+                    max_tokens=sec_max_tokens,
+                    extra_headers=extra_headers,
+                )
+
+                # =========================================================================
+                # Assemble Full Literature Review
+                # =========================================================================
+                paper_list_md = ", ".join(f"`{p}`" for p in paper_names)
+                full_review = (
+                    f"# Comprehensive Cross-Study Literature Review\n\n"
+                    f"**Synthesized Studies ({len(paper_names)} Papers):** {paper_list_md}\n\n"
+                    f"---\n\n"
+                    f"{sec1_text.strip()}\n\n"
+                    f"---\n\n"
+                    f"{sec2_text.strip()}\n\n"
+                    f"---\n\n"
+                    f"{sec3_text.strip()}\n\n"
+                    f"---\n\n"
+                    f"{sec4_text.strip()}\n"
+                )
+
+                st.session_state.literature_review = full_review
+                status.update(label="✅ Literature Review Synthesis Complete!", state="complete", expanded=False)
+
+        # Display cached or newly generated literature review
+        if st.session_state.literature_review:
+            st.markdown(st.session_state.literature_review)
+            st.download_button(
+                label="📥 Download Literature Review (.md)",
+                data=st.session_state.literature_review,
+                file_name="literature_review.md",
+                mime="text/markdown",
+            )
 
 if __name__ == "__main__":
     main()

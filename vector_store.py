@@ -759,6 +759,94 @@ def _format_doc_for_context(doc) -> str:
     source_text = meta.get("raw_text", doc.page_content)
     return f"[Source: {trace}]\n{source_text}" if trace else source_text
 
+
+def extract_global_paper_briefs(documents_data: dict, max_chars_per_paper: int = 2500) -> str:
+    """
+    Extract a high-level executive profile for every uploaded paper from its initial text.
+    Captures the title, abstract, and core problem formulation so the LLM retains global
+    awareness of all papers during synthesis.
+    """
+    if not documents_data:
+        return "No paper texts available."
+    briefs = []
+    for filename, full_text in documents_data.items():
+        cleaned = re.sub(r"^---\s*START OF PAPER[^-]*---\s*", "", full_text, flags=re.IGNORECASE).strip()
+        intro_slice = cleaned[:max_chars_per_paper].strip()
+        briefs.append(f"### Paper: {filename}\n{intro_slice}")
+    return "\n\n".join(briefs)
+
+
+def retrieve_balanced_review_context(
+    vector_store,
+    paper_names: list[str],
+    query: str,
+    target_k: int = 36,
+    max_chars: int = 250000,
+    prioritize_visuals: bool = False,
+) -> str:
+    """
+    Balanced multi-paper retrieval for literature review sections.
+    Guarantees that every uploaded paper contributes top relevant chunks,
+    boosts visual evidence (tables/captions) if requested,
+    and includes top global salient chunks.
+    """
+    if not vector_store or not paper_names:
+        return ""
+
+    num_papers = max(1, len(paper_names))
+    per_paper_quota = max(3, min(8, target_k // num_papers))
+
+    gathered_docs = []
+    seen_keys = set()
+
+    # 1. Balanced per-paper retrieval
+    for paper in paper_names:
+        paper_docs = retrieve_docs(
+            vector_store,
+            query=query,
+            k=per_paper_quota,
+            source_filter=paper,
+            candidate_k=max(15, per_paper_quota * 3),
+        )
+        for d in paper_docs:
+            k = _unique_doc_key(d)
+            if k not in seen_keys:
+                seen_keys.add(k)
+                gathered_docs.append(d)
+
+    # 2. Global salience retrieval across all papers
+    global_docs = retrieve_docs(
+        vector_store,
+        query=query,
+        k=min(12, target_k),
+        source_filter=None,
+        candidate_k=30,
+    )
+    for d in global_docs:
+        k = _unique_doc_key(d)
+        if k not in seen_keys:
+            seen_keys.add(k)
+            gathered_docs.append(d)
+
+    # 3. If prioritize_visuals is enabled, prioritize tables, formulas, and visual captions
+    if prioritize_visuals:
+        def visual_sort_key(d):
+            ctype = (d.metadata or {}).get("content_type", "text")
+            return 0 if ctype in {"table", "caption", "formula"} else 1
+        gathered_docs.sort(key=visual_sort_key)
+
+    # 4. Format chunks with source provenance and enforce max_chars ceiling
+    formatted_chunks = []
+    total_chars = 0
+    for doc in gathered_docs:
+        formatted = _format_doc_for_context(doc)
+        if total_chars + len(formatted) > max_chars:
+            break
+        formatted_chunks.append(formatted)
+        total_chars += len(formatted)
+
+    return "\n\n".join(formatted_chunks)
+
 def initialize_vector_store(documents_data: dict, progress_callback=None):
     """
     Chunks the combined text and captions from multiple papers 

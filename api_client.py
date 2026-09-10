@@ -263,17 +263,17 @@ def condense_query_with_history(
 
     history_str = "\n".join(formatted_turns)
     prompt = f"""Given the following conversation history and a follow-up question from a researcher reading academic papers, rephrase the follow-up question to be a complete, standalone search query.
-Include necessary context such as specific paper names, model names, algorithms, or experimental setups referenced earlier.
-Do NOT answer the question. Do NOT include quotes or prefixes like "Standalone query:". Only return the rephrased search query.
-If the question is already complete and standalone, return it exactly as is.
+                Include necessary context such as specific paper names, model names, algorithms, or experimental setups referenced earlier.
+                Do NOT answer the question. Do NOT include quotes or prefixes like "Standalone query:". Only return the rephrased search query.
+                If the question is already complete and standalone, return it exactly as is.
 
-Conversation History:
-{history_str}
+                Conversation History:
+                {history_str}
 
-Follow-up Question:
-{latest_query}
+                Follow-up Question:
+                {latest_query}
 
-Standalone Query:"""
+                Standalone Query:"""
 
     try:
         headers_to_send = extra_headers if extra_headers is not None else OPENROUTER_HEADERS
