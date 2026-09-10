@@ -12,10 +12,7 @@ os.environ["PATH"] = docker_dir + os.pathsep + os.environ["PATH"]
 print("Docker found at:", shutil.which("docker"))
 
 
-# ============================================================
 # Paths
-# ============================================================
-
 PDF_PATH = Path(
     r"D:\Edu\Project\bot literature\xiu 2026.pdf"
 )
@@ -24,25 +21,14 @@ OUTPUT_DIR = Path(
     r"D:\Lit-review-bot\LitReviewBot\extracted_visuals"
 )
 
-
-# ============================================================
-# Prepare output directory
-# ============================================================
-
+# Output directory setup
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-
-# ============================================================
 # Run Marker
-# ============================================================
-
-# Use the Python executable from the current virtual environment.
-# This avoids accidentally calling Marker from another environment.
-
+# Use the Python executable from the current virtual environment
 marker_exe = Path(sys.executable).parent / "marker_single.exe"
 
 if not marker_exe.exists():
-    # On some installations the executable may be named marker_single
     marker_exe = Path(sys.executable).parent / "marker_single"
 
 if not marker_exe.exists():
@@ -52,24 +38,19 @@ if not marker_exe.exists():
         f"Make sure marker-pdf is installed in this venv."
     )
 
-
-command = [ str(marker_exe), 
-           str(PDF_PATH), 
-           # Output location 
-           "--output_dir", 
-           str(OUTPUT_DIR), 
-           # Markdown output 
-           "--output_format", 
-           "markdown", 
-           # CPU-only layout/table reconstruction. OCR is disabled so Marker
-           # cannot start its VLM/VLLM backend; PDF text-layer formulas remain
-           # available and figure/image extraction remains unchanged.
-           "--mode",
-           "fast",
-           "--disable_ocr",
-           # Prevent multiprocessing issues on Windows 
-           "--disable_multiprocessing", ]
-
+command = [
+    str(marker_exe), 
+    str(PDF_PATH), 
+    "--output_dir", 
+    str(OUTPUT_DIR), 
+    "--output_format", 
+    "markdown", 
+    # CPU-only layout and table reconstruction
+    "--mode",
+    "fast",
+    "--disable_ocr",
+    "--disable_multiprocessing",
+]
 
 print("=" * 70)
 print("Running Marker")
@@ -81,11 +62,7 @@ print("Command:")
 print(" ".join(f'"{x}"' if " " in x else x for x in command))
 print()
 
-
-# ============================================================
 # Execute
-# ============================================================
-
 result = subprocess.run(
     command,
     stdout=subprocess.PIPE,
@@ -98,15 +75,10 @@ result = subprocess.run(
     },
 )
 
-
 # Print Marker output
 print(result.stdout)
 
-
-# ============================================================
-# Result
-# ============================================================
-
+# Check result
 if result.returncode != 0:
     raise RuntimeError(
         f"\nMarker failed with exit code {result.returncode}."

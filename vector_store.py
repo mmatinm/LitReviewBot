@@ -761,11 +761,7 @@ def _format_doc_for_context(doc) -> str:
 
 
 def extract_global_paper_briefs(documents_data: dict, max_chars_per_paper: int = 2500) -> str:
-    """
-    Extract a high-level executive profile for every uploaded paper from its initial text.
-    Captures the title, abstract, and core problem formulation so the LLM retains global
-    awareness of all papers during synthesis.
-    """
+    """Extract brief document introductions for broad context."""
     if not documents_data:
         return "No paper texts available."
     briefs = []
@@ -784,12 +780,7 @@ def retrieve_balanced_review_context(
     max_chars: int = 250000,
     prioritize_visuals: bool = False,
 ) -> str:
-    """
-    Balanced multi-paper retrieval for literature review sections.
-    Guarantees that every uploaded paper contributes top relevant chunks,
-    boosts visual evidence (tables/captions) if requested,
-    and includes top global salient chunks.
-    """
+    """Retrieve balanced chunks across all papers for review generation."""
     if not vector_store or not paper_names:
         return ""
 
@@ -799,7 +790,7 @@ def retrieve_balanced_review_context(
     gathered_docs = []
     seen_keys = set()
 
-    # 1. Balanced per-paper retrieval
+    # Per-paper retrieval
     for paper in paper_names:
         paper_docs = retrieve_docs(
             vector_store,
@@ -814,7 +805,7 @@ def retrieve_balanced_review_context(
                 seen_keys.add(k)
                 gathered_docs.append(d)
 
-    # 2. Global salience retrieval across all papers
+    # Cross-paper salience retrieval
     global_docs = retrieve_docs(
         vector_store,
         query=query,
@@ -828,14 +819,14 @@ def retrieve_balanced_review_context(
             seen_keys.add(k)
             gathered_docs.append(d)
 
-    # 3. If prioritize_visuals is enabled, prioritize tables, formulas, and visual captions
+    # Prioritize visual and tabular content if requested
     if prioritize_visuals:
         def visual_sort_key(d):
             ctype = (d.metadata or {}).get("content_type", "text")
             return 0 if ctype in {"table", "caption", "formula"} else 1
         gathered_docs.sort(key=visual_sort_key)
 
-    # 4. Format chunks with source provenance and enforce max_chars ceiling
+    # Assemble formatted context within character limit
     formatted_chunks = []
     total_chars = 0
     for doc in gathered_docs:
@@ -848,10 +839,7 @@ def retrieve_balanced_review_context(
     return "\n\n".join(formatted_chunks)
 
 def initialize_vector_store(documents_data: dict, progress_callback=None):
-    """
-    Chunks the combined text and captions from multiple papers 
-    and embeds them into a FAISS local vector store.
-    """
+    """Build a FAISS vector store from document text and visual annotations."""
     if progress_callback:
         progress_callback("Splitting documents paragraph-by-paragraph...")
 

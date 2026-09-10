@@ -474,21 +474,21 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
         for page_num in range(len(pdf_document)):
             page = pdf_document.load_page(page_num)
             
-            # --- 1. Gather all geometric visual regions with massive pure C speedups! ---
+            # Detect visual regions
             raw_rects = []
             
-            # 1a. Rasp Images
+            # Raster images
             for img in page.get_image_info(xrefs=True):
                 raw_rects.append(fitz.Rect(img["bbox"]))
                 
-            # 1b. Vector Graphics (charts/graphs/schematics)
+            # Vector graphics (charts, plots, diagrams)
             for d in page.get_drawings():
                 r = d["rect"]
-                # Prevent massive invisible page-borders from mapping as an image
+                # Prevent full page border artifacts from being treated as images
                 if 10 < r.width < page.rect.width * 0.90 and 10 < r.height < page.rect.height * 0.40:
                     raw_rects.append(fitz.Rect(r))
                     
-            # 1c. Native Fast Tables
+            # Tables
             tabs = page.find_tables()
             if tabs.tables:
                 for t in tabs.tables:
@@ -496,8 +496,8 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                 
             merged_visuals = merge_visual_rects(raw_rects, margin=15, vertical_margin=10)
             
-            # --- 2. Extract Text & Clean Pollutant Labels ---
-            # We use "dict" to preserve geometry accurately.
+            # Extract text blocks
+            # Use dictionary format to maintain geometry
             page_dict = page.get_text("dict", flags=fitz.TEXT_DEHYPHENATE)
             text_blocks = []
             
@@ -592,7 +592,7 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
             ordered_blocks = sort_text_blocks(text_blocks, page.rect.width)
             all_paragraphs.extend(extract_paragraphs_from_blocks(ordered_blocks))
 
-        # --- 3. Link Captions, Sweep Orphaned Labels, Query Vision ---
+        # Link captions with detected visual elements
         full_paper_formatted_text = f"--- START OF PAPER: {filename} ---\n\n"
         
         for page_num, (page, text_blocks, merged_visuals) in enumerate(page_payloads):
@@ -638,14 +638,10 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                             # 10px boundary pad
                             final_rect = matched_visual + (-10, -10, 10, 10) 
                             
-                            # CRITICAL FIX for the "CNN/LSTM text cutoff":
-                            # We stretch the bounding box perfectly flush to the caption header 
-                            # capturing all un-boxed sub-labels naturally sitting between.
-                            # Both tables and figures are above their captions.
+                            # Extend bounding box to caption header to capture intermediate labels
                             final_rect.y1 = max(final_rect.y1, caption_rect.y0 - 2)
 
-                            # Problem 1: Crop full width pictures wider BUT keep tables constrained
-                            # If a FIGURE spans a large segment horizontally, stretch it to the page margins
+                            # Extend wide figures to page margins while constraining tables
                             if "fig" in label_type and final_rect.width > page.rect.width * 0.65:
                                 final_rect.x0 = 35 
                                 final_rect.x1 = page.rect.width - 35
@@ -709,7 +705,7 @@ def extract_pdf_data(upload_files, client: OpenAI, vision_model: str, progress_c
                         except Exception as e:
                             print(f"[Warn] Render failed for {canonical_label}: {e}")
 
-            # Sort intelligently using topological column algorithm (Fixes messy text)
+            # Sort text blocks using reading order layout algorithm
             sorted_blocks = sort_text_blocks(text_blocks, page.rect.width)
 
             # Build page text as paragraph-separated units for better chunking quality.

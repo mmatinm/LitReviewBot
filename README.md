@@ -1,148 +1,97 @@
-# Literature Review Bot (Early Release)
+# ScholarLens: Academic Literature Review Assistant
 
-This is an early release of Literature Review Bot for Windows.
+ScholarLens is a local, multi-paper research assistant and literature review generator. It extracts structured content from academic PDFs, indexes text and visual elements into a hybrid vector store, and synthesizes cross-study literature reviews using state-of-the-art language models.
 
-It helps you:
-- process PDF and TXT papers
-- ask questions about your papers
-- generate paper summaries
-- generate a cross-paper literature review
-- retain processed text in the app session
+---
 
-## How to Run and Use
+## Key Features
 
-### 1. What you need
+- **High-Fidelity PDF Parsing**: Extracts text, LaTeX equations, tables, and figures using [Marker](https://github.com/VikParuchuri/marker) in fast, CPU-friendly mode.
+- **Hybrid Retrieval Engine**: Combines dense semantic embeddings (`sentence-transformers/all-MiniLM-L6-v2`) and BM25 lexical search with CPU cross-encoder reranking (`bge-reranker-base`).
+- **Multi-Turn Conversational Q&A**: Maintains conversation history, automatically reformulates follow-up queries, allows paper-specific scoping, and cites exact source chunks with page and section metadata.
+- **Structured Paper Summaries**: Automatically generates comprehensive summaries covering objectives, methodology, empirical findings, and limitations.
+- **4-Stage Review Synthesis**: Generates publication-grade literature reviews across multiple papers:
+  1. *Thematic Landscape & Problem Formulation*
+  2. *Comparative Methodologies & Architectural Matrix*
+  3. *Empirical Synthesis & Benchmark Comparison*
+  4. *Critical Discussion, Future Directions & Research Gaps*
+- **Multi-Provider LLM Support**: Built-in support for **OpenRouter**, **AvalAI**, and **Hormouz AI**, with custom model IDs and automatic exponential backoff retries.
 
-1. Windows
-2. Internet connection
-3. OpenRouter API key
-4. The project source files in one folder.
+---
 
-### 2. How to run the app
+## Quickstart
 
-1. Open a PowerShell window in the project folder.
-2. Start the app with:
-   - `python -m streamlit run app.py`
-3. If Windows asks about network access, click Allow.
-4. Your browser should open the app.
-5. If browser does not open, manually go to:
-   - http://localhost:8501
+### 1. Clone the Repository
+```bash
+git clone https://github.com/your-username/ScholarLens.git
+cd ScholarLens
+```
 
-### 3. Get your OpenRouter API key
+### 2. Set Up a Virtual Environment
+```bash
+# Create and activate virtual environment (Windows PowerShell)
+python -m venv venv
+.\venv\Scripts\Activate.ps1
 
-1. Go to https://openrouter.ai/keys
-2. Sign in or create an account.
-3. Create a new API key.
-4. Copy the key.
-5. In the app sidebar, paste it into OpenRouter API Key.
+# On Linux / macOS:
+# python3 -m venv venv
+# source venv/bin/activate
+```
 
-### 4. Quick start in the app
+### 3. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
 
-1. In sidebar, select models (or keep defaults).
-2. Upload files in Document Upload:
-   - supported: PDF, TXT
-3. PDFs are processed automatically with local Marker in CPU-only mode.
-4. Click process Papers.
-5. Use tabs in the main area:
-   - Chat
-   - Summaries
-   - Literature Review Builder
+### 4. Run the Application
+```bash
+streamlit run app.py
+```
+Open [http://localhost:8501](http://localhost:8501) in your browser.
 
-### 5. UI guide
+---
 
-#### Screenshot 1: Sidebar Configuration and Upload
+## Supported Providers & Models
 
-This screenshot shows where to:
-- enter API key
-- choose the text model
-- upload documents
-- upload documents for processing
-- click process Papers
+ScholarLens supports multiple OpenAI-compatible API providers configured directly from the sidebar:
 
-![Sidebar Configuration and Upload](docs/images/sidebar-configuration-upload.png)
+| Provider | Supported Models | Default Vision / Image Model |
+| :--- | :--- | :--- |
+| **OpenRouter** | `google/gemini-2.5-flash`, `anthropic/claude-3.5-sonnet`, `meta-llama/llama-3.3-70b-instruct`, Custom IDs | `google/gemini-2.5-flash` |
+| **AvalAI** | `gemini-2.5-flash-lite`, `gpt-4.1-nano`, Custom IDs | `gemini-2.5-flash-lite`, `gpt-4.1-nano` |
+| **Hormouz AI** | `nemotron-3-ultra-550b-a55b-free`, `gemma-4-31b-it-free`, Custom IDs | `gemma-4-31b-it-free` |
 
-#### Screenshot 2: Main Tabs and Chat Area
+---
 
-This screenshot shows where to:
-- switch between tabs
-- ask questions in Chat
-- generate summaries and literature reviews
+## Usage Workflow
 
-![Main Tabs and Chat Area](docs/images/main-tabs-chat-area.png)
+1. **Configure Provider**: Select your LLM provider and enter your API key in the sidebar.
+2. **Upload Documents**: Drag and drop research papers (`.pdf`, `.txt`, `.md`).
+3. **Index Documents**: Click **Index Documents**. Marker processes the PDFs into structured Markdown with page anchors, table markers, and figure captions.
+4. **Explore & Synthesize**:
+   - **Chat**: Ask targeted questions across all papers or narrow the scope to an individual paper.
+   - **Paper Summaries**: Select any paper to generate a structured academic breakdown.
+   - **Literature Review Builder**: Run the 4-stage pipeline to generate a comprehensive, publication-ready cross-study review.
 
-### 6. What each tab does
+---
 
-#### Chat
-- Ask questions about your uploaded papers.
-- You can scope retrieval to one paper or all papers.
+## Project Structure
 
-#### Summaries
-- Pick one paper and generate a structured summary.
+```text
+├── app.py                 # Streamlit application UI and orchestration
+├── api_client.py          # Provider client, resilient chat completions, image captioning
+├── config.py              # Provider endpoints, model registries, and constants
+├── marker_processor.py    # Marker PDF extraction pipeline and visual linking
+├── pdf_processor.py       # Fallback PyMuPDF extraction engine
+├── vector_store.py        # Section-aware chunking, FAISS index, BM25, and reranking
+├── requirements.txt       # Python dependencies
+└── README.md
+```
 
-#### Literature Review Builder
-- Generate a combined review across uploaded papers.
-- Choose short or long output.
-- Optionally include figure/table mentions.
+---
 
-### 7. Marker PDF extraction
+## License & Disclaimer
 
-Marker is the app's automatic local PDF processor. It produces Markdown with
-LaTeX equations, formatted tables, and extracted images.
+Distributed under the MIT License.
 
-1. Install the project dependencies, including Marker:
-   - `python -m pip install -r requirements.txt`
-   - Or only Marker: `python -m pip install marker-pdf`
-2. Verify the CLI:
-   - `marker_single --help`
-3. Start the app:
-   - `python -m streamlit run app.py`
-4. Upload a PDF and click **process Papers**. Marker is selected automatically.
-
-Marker mode uses `fast` mode, paginated Markdown output, and disables multiprocessing to reduce CPU/RAM usage. Pagination markers preserve the source PDF page number for chunk metadata. Marker itself does not use OpenRouter during parsing; when an OpenRouter key is provided, the app uses the selected image-caption model to describe extracted paper images and adds those descriptions to the searchable paper text. Processed paper Markdown is saved under `extracted_texts/<paper>_processed.md`; original images and `.txt` sidecars containing nearby extracted text and captions are stored under `extracted_visuals/<paper>/`.
-
-For difficult scanned or math-heavy PDFs, Marker supports higher-accuracy modes and optional LLM correction, but those require more local resources or API usage and are intentionally not enabled by this integration.
-
-The current `requirements.txt` is the Marker profile. MinerU is not part of this application.
-
-
-## Disclaimer (Early Release)
-
-This is an early release.
-
-Please read these points before using the app.
-
-## 1. Early release status
-
-1. This version is not perfect.
-2. Some bugs and rough edges may exist.
-3. Results may change as the app is updated.
-
-## 2. AI output quality
-
-1. AI answers can be wrong, incomplete, or biased.
-2. Always verify important claims with original papers.
-3. Do not treat generated text as final truth.
-
-## 3. API usage and cost
-
-1. You use your own OpenRouter API key.
-2. Your account may be charged based on your OpenRouter plan.
-3. Vision processing can increase usage and cost.
-
-## 4. Privacy and data handling
-
-1. Do not upload sensitive or regulated data unless allowed by your policy.
-2. Keep your API key private.
-3. Use trusted devices and networks.
-
-## 5. Availability and support
-
-1. This release is provided as-is.
-2. No uptime or compatibility guarantee is provided.
-3. Feature behavior can change in future releases.
-
-## 6. Responsible use
-
-1. Use this tool only for legal and ethical work.
-2. Follow copyright and data-use rules for all uploaded papers.
-3. You are responsible for your usage and outputs.
+This tool is intended for research assistance and literature synthesis. Always verify critical citations, numerical findings, and empirical claims against original source publications.

@@ -1,6 +1,15 @@
 import base64
+import logging
 import re
-from openai import OpenAI
+import time
+from openai import (
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    InternalServerError,
+    OpenAI,
+    RateLimitError,
+)
 from config import OPENROUTER_BASE_URL, OPENROUTER_HEADERS
 
 
@@ -39,6 +48,26 @@ def get_openrouter_client(api_key: str) -> OpenAI:
     """Initializes the OpenAI client pointing to OpenRouter."""
     return get_llm_client(api_key, OPENROUTER_BASE_URL)
 
+def _safe_extract_chat_content(response) -> str | None:
+    """Extract text content from a chat completion response."""
+    if response is None:
+        return None
+    choices = getattr(response, "choices", None)
+    if not choices or not isinstance(choices, (list, tuple)) or len(choices) == 0:
+        return None
+    choice = choices[0]
+    if choice is None:
+        return None
+    message = getattr(choice, "message", None)
+    if message is None:
+        if isinstance(choice, dict):
+            msg = choice.get("message")
+            if isinstance(msg, dict):
+                return _extract_message_text(msg.get("content"))
+        return None
+    content = getattr(message, "content", None)
+    return _extract_message_text(content)
+
 def call_openrouter(
     client: OpenAI,
     model: str,
@@ -47,53 +76,98 @@ def call_openrouter(
     temperature: float = 0.5,
     max_tokens: int = 1200,
     extra_headers: dict | None = None,
+    max_retries: int = 3,
+    backoff_factor: float = 1.5,
 ) -> str:
-    """Standard call to a Text Model on OpenRouter, AvalAI, or Hormouz AI."""
+    """Execute a chat completion request with automatic retries."""
     headers_to_send = extra_headers if extra_headers is not None else OPENROUTER_HEADERS
     safe_headers = _sanitize_headers_ascii(headers_to_send) if headers_to_send else None
-    try:
-        safe_system_prompt = _normalize_text_quotes(system_prompt)
-        safe_prompt = _normalize_text_quotes(prompt)
 
-        req_kwargs = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": safe_system_prompt},
-                {"role": "user", "content": safe_prompt}
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-        if safe_headers:
-            req_kwargs["extra_headers"] = safe_headers
+    safe_system_prompt = _normalize_text_quotes(system_prompt)
+    safe_prompt = _normalize_text_quotes(prompt)
 
-        response = client.chat.completions.create(**req_kwargs)
-        return response.choices[0].message.content
-    except UnicodeEncodeError:
-        # Hard fallback for environments/transports that still enforce ASCII.
+    req_kwargs = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": safe_system_prompt},
+            {"role": "user", "content": safe_prompt}
+        ],
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if safe_headers:
+        req_kwargs["extra_headers"] = safe_headers
+
+    last_error = "Unknown error"
+
+    for attempt in range(1, max_retries + 1):
         try:
-            ascii_system_prompt = _normalize_text_quotes(system_prompt).encode("ascii", "ignore").decode("ascii")
-            ascii_prompt = _normalize_text_quotes(prompt).encode("ascii", "ignore").decode("ascii")
-            ascii_model = str(model).encode("ascii", "ignore").decode("ascii") or str(model)
-
-            req_kwargs = {
-                "model": ascii_model,
-                "messages": [
-                    {"role": "system", "content": ascii_system_prompt},
-                    {"role": "user", "content": ascii_prompt}
-                ],
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            }
-            if safe_headers:
-                req_kwargs["extra_headers"] = safe_headers
-
             response = client.chat.completions.create(**req_kwargs)
-            return response.choices[0].message.content
+            content = _safe_extract_chat_content(response)
+
+            if content and content.strip():
+                return content.strip()
+
+            last_error = "Model response contained empty choices or null message content."
+            if attempt < max_retries:
+                time.sleep(backoff_factor ** attempt)
+                continue
+
+        except (APIConnectionError, APITimeoutError) as net_err:
+            last_error = f"Connection/timeout error ({net_err.__class__.__name__}): {net_err}"
+            if attempt < max_retries:
+                time.sleep(backoff_factor ** attempt)
+                continue
+
+        except RateLimitError as rate_err:
+            last_error = f"Rate limit exceeded (HTTP 429): {rate_err}"
+            if attempt < max_retries:
+                time.sleep(max(2.0, (backoff_factor ** attempt) * 2))
+                continue
+
+        except InternalServerError as srv_err:
+            last_error = f"Provider internal server error (HTTP 5xx): {srv_err}"
+            if attempt < max_retries:
+                time.sleep(backoff_factor ** attempt)
+                continue
+
+        except UnicodeEncodeError:
+            try:
+                ascii_system_prompt = safe_system_prompt.encode("ascii", "ignore").decode("ascii")
+                ascii_prompt = safe_prompt.encode("ascii", "ignore").decode("ascii")
+                ascii_model = str(model).encode("ascii", "ignore").decode("ascii") or str(model)
+
+                fallback_kwargs = {
+                    "model": ascii_model,
+                    "messages": [
+                        {"role": "system", "content": ascii_system_prompt},
+                        {"role": "user", "content": ascii_prompt}
+                    ],
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                }
+                if safe_headers:
+                    fallback_kwargs["extra_headers"] = safe_headers
+
+                fallback_resp = client.chat.completions.create(**fallback_kwargs)
+                fb_content = _safe_extract_chat_content(fallback_resp)
+                if fb_content and fb_content.strip():
+                    return fb_content.strip()
+                last_error = "Model response contained empty content during ASCII fallback."
+            except Exception as fb_err:
+                last_error = f"ASCII encoding fallback failed: {fb_err}"
+
+            if attempt < max_retries:
+                time.sleep(backoff_factor ** attempt)
+                continue
+
         except Exception as e:
-            return f"Error calling Main Text Model: {e}"
-    except Exception as e:
-        return f"Error calling Main Text Model: {e}"
+            last_error = f"{type(e).__name__}: {e}"
+            if attempt < max_retries:
+                time.sleep(backoff_factor ** attempt)
+                continue
+
+    return f"Error calling Main Text Model ({model}) after {max_retries} attempts: {last_error}"
 
 def encode_image(image_bytes: bytes) -> str:
     """Converts image bytes to base64 string."""
@@ -145,8 +219,9 @@ def generate_image_caption(
     context: str,
     image_media_type: str = "image/jpeg",
     extra_headers: dict | None = None,
+    max_retries: int = 3,
 ) -> str:
-    """Send image and surrounding text context to Vision Model to generate a caption."""
+    """Generate a caption for an image and nearby text context."""
     headers_to_send = extra_headers if extra_headers is not None else OPENROUTER_HEADERS
     safe_headers = _sanitize_headers_ascii(headers_to_send) if headers_to_send else None
     base64_image = encode_image(image_bytes)
@@ -163,8 +238,8 @@ def generate_image_caption(
         Do not use headings, bullets, numbered lists, line breaks, or Markdown.
         """
 
-        last_error = None
-        for _ in range(2):
+        last_error = "Unknown error"
+        for attempt in range(1, max_retries + 1):
             try:
                 req_kwargs = {
                     "model": vision_model,
@@ -189,17 +264,18 @@ def generate_image_caption(
                     req_kwargs["extra_headers"] = safe_headers
 
                 response = client.chat.completions.create(**req_kwargs)
+                text = _safe_extract_chat_content(response)
 
-                choice = response.choices[0]
-                text = _extract_message_text(choice.message.content)
-
-                if not text or text.strip().lower() == "none":
-                    last_error = "empty response from model"
+                if not text or text.strip().lower() in {"none", ""}:
+                    last_error = "empty or null response from vision model"
+                    time.sleep(1.5 * attempt)
                     continue
 
-                finish_reason = getattr(choice, "finish_reason", None)
+                # Check if output was cut off
+                choices = getattr(response, "choices", None)
+                choice = choices[0] if (choices and len(choices) > 0) else None
+                finish_reason = getattr(choice, "finish_reason", None) if choice else None
                 if finish_reason == "length" or _looks_incomplete(text):
-                    # Ask the model to continue so outputs are not cut mid-sentence.
                     cont_kwargs = {
                         "model": vision_model,
                         "messages": [
@@ -224,16 +300,20 @@ def generate_image_caption(
                     if safe_headers:
                         cont_kwargs["extra_headers"] = safe_headers
 
-                    continuation = client.chat.completions.create(**cont_kwargs)
-                    cont_text = _extract_message_text(continuation.choices[0].message.content)
-                    if cont_text:
-                        text = f"{text}\n{cont_text}".strip()
+                    try:
+                        continuation = client.chat.completions.create(**cont_kwargs)
+                        cont_text = _safe_extract_chat_content(continuation)
+                        if cont_text:
+                            text = f"{text}\n{cont_text}".strip()
+                    except Exception:
+                        pass
 
                 return _coherent_caption(text)
             except Exception as retry_error:
-                last_error = retry_error
+                last_error = str(retry_error)
+                time.sleep(1.5 * attempt)
 
-        return f"[Image transcription failed: {last_error}]"
+        return f"[Image transcription failed after {max_retries} attempts: {last_error}]"
     except Exception as e:
         return f"[Image transcription failed: {e}]"
 
@@ -245,11 +325,11 @@ def condense_query_with_history(
     latest_query: str,
     extra_headers: dict | None = None,
 ) -> str:
-    """Rewrite a conversational follow-up into a standalone search query using chat history."""
+    """Rewrite follow-up question into a standalone search query."""
     if not chat_history or not (latest_query or "").strip():
         return latest_query
 
-    # Extract up to the last 4 messages (2 conversational turns) to keep condensation fast and focused
+    # Use the last few messages for query reformulation
     recent_history = chat_history[-4:]
     formatted_turns = []
     for msg in recent_history:
@@ -263,17 +343,17 @@ def condense_query_with_history(
 
     history_str = "\n".join(formatted_turns)
     prompt = f"""Given the following conversation history and a follow-up question from a researcher reading academic papers, rephrase the follow-up question to be a complete, standalone search query.
-                Include necessary context such as specific paper names, model names, algorithms, or experimental setups referenced earlier.
-                Do NOT answer the question. Do NOT include quotes or prefixes like "Standalone query:". Only return the rephrased search query.
-                If the question is already complete and standalone, return it exactly as is.
+Include necessary context such as specific paper names, model names, algorithms, or experimental setups referenced earlier.
+Do NOT answer the question. Do NOT include quotes or prefixes like "Standalone query:". Only return the rephrased search query.
+If the question is already complete and standalone, return it exactly as is.
 
-                Conversation History:
-                {history_str}
+Conversation History:
+{history_str}
 
-                Follow-up Question:
-                {latest_query}
+Follow-up Question:
+{latest_query}
 
-                Standalone Query:"""
+Standalone Query:"""
 
     try:
         headers_to_send = extra_headers if extra_headers is not None else OPENROUTER_HEADERS
@@ -292,7 +372,10 @@ def condense_query_with_history(
             req_kwargs["extra_headers"] = safe_headers
 
         response = client.chat.completions.create(**req_kwargs)
-        rewritten = _extract_message_text(response.choices[0].message.content).strip()
+        raw_text = _safe_extract_chat_content(response)
+        if not raw_text:
+            return latest_query
+        rewritten = raw_text.strip()
         rewritten = re.sub(r'^(?:Standalone\s*Query\s*:\s*|Query\s*:\s*)', '', rewritten, flags=re.IGNORECASE).strip().strip('"\'')
         return rewritten if rewritten else latest_query
     except Exception:

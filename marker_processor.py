@@ -210,16 +210,19 @@ def extract_pdf_data_with_marker(
             if api_key and image_paths:
                 caption_client = get_llm_client(api_key, base_url=base_url or OPENROUTER_BASE_URL)
                 for image_path in image_paths:
-                    context = _image_context(source_markdown, image_path)
-                    caption = generate_image_caption(
-                        caption_client,
-                        image_model,
-                        image_path.read_bytes(),
-                        context,
-                        mimetypes.guess_type(image_path.name)[0] or "application/octet-stream",
-                        extra_headers=extra_headers,
-                    ).strip()
-                    captions_by_name[image_path.name] = caption
+                    try:
+                        context = _image_context(source_markdown, image_path)
+                        caption = generate_image_caption(
+                            caption_client,
+                            image_model,
+                            image_path.read_bytes(),
+                            context,
+                            mimetypes.guess_type(image_path.name)[0] or "application/octet-stream",
+                            extra_headers=extra_headers,
+                        ).strip()
+                        captions_by_name[image_path.name] = caption
+                    except Exception as img_err:
+                        captions_by_name[image_path.name] = f"[Image transcription failed: {img_err}]"
                 markdown = _insert_captions_in_place(markdown, captions_by_name)
 
             full_paper_text = f"--- START OF PAPER: {filename} ---\n\n{markdown}\n"
