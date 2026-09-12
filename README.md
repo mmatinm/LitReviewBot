@@ -2,6 +2,8 @@
 
 LitReviewBot is a local, multi-paper research assistant and literature review generator. It extracts structured content from academic PDFs, indexes text and visual elements into a hybrid vector store, and synthesizes cross-study literature reviews using state-of-the-art language models.
 
+[![Launch App](https://img.shields.io/badge/Launch_App-LitReviewBot-2563EB?style=for-the-badge&logo=streamlit&logoColor=white)](https://litreviewbot.streamlit.app/)
+
 ---
 
 ## Key Features
