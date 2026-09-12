@@ -181,15 +181,29 @@ def extract_pdf_data_with_marker(
                 "--disable_ocr",
                 "--disable_multiprocessing",
             ]
+            # Marker attempts by default to write fonts and debug artifacts inside python's
+            # site-packages/static directory. On Linux/Streamlit Cloud, standard users don't
+            # have write access to site-packages, causing PermissionError [Errno 13].
+            # We redirect FONT_DIR, FONT_PATH, and DEBUG_DATA_FOLDER to a writable user directory.
+            cache_base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "marker"
+            font_dir = cache_base / "fonts"
+            font_dir.mkdir(parents=True, exist_ok=True)
+            font_path = font_dir / "GoNotoCurrent-Regular.ttf"
+
+            marker_env = {
+                **os.environ,
+                "TORCH_DEVICE": "cpu",
+                "FAST_DETECTOR_DEVICE": "cpu",
+                "FONT_DIR": str(font_dir),
+                "FONT_PATH": str(font_path),
+                "DEBUG_DATA_FOLDER": str(cache_base / "debug_data"),
+            }
+
             proc = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                env={
-                    **os.environ,
-                    "TORCH_DEVICE": "cpu",
-                    "FAST_DETECTOR_DEVICE": "cpu",
-                },
+                env=marker_env,
             )
             if proc.returncode != 0:
                 error_text = (proc.stderr or proc.stdout or "").strip()[-1600:]
